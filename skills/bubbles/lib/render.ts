@@ -306,6 +306,7 @@ aside .p em{font-style:normal;color:var(--muted)}
 aside .b{font:12px "JetBrains Mono",ui-monospace,Menlo,monospace;color:var(--muted);font-variant-numeric:tabular-nums}
 #tip{position:fixed;pointer-events:none;z-index:20;background:var(--ink);color:var(--panel);font:12px "JetBrains Mono",ui-monospace,Menlo,monospace;padding:6px 9px;border-radius:4px;max-width:min(440px,80vw);overflow-wrap:anywhere}
 footer{color:var(--muted);font-size:13px;max-width:84ch}
+footer a{color:var(--accent)}
 footer code{font:12px "JetBrains Mono",ui-monospace,Menlo,monospace}`;
 
 const PAGE_JS = String.raw`(() => {
@@ -505,7 +506,7 @@ ${svg}
 </div>
 ${list}
 </div>
-<footer>Every file is a dot, bigger for bigger files; every folder is the cell grown around its files, so subfolders sit inside their parents. The map is replayed from the repository's history and holds still as the code grows: files keep their places, and new files take the nearest free spot in their folder. Made with bubbles.</footer>
+<footer>Every file is a dot, bigger for bigger files; every folder is the cell grown around its files, so subfolders sit inside their parents. The map is replayed from the repository's history and holds still as the code grows: files keep their places, and new files take the nearest free spot in their folder. Made with <a href="https://github.com/nateroling/bubbles" target="_blank" rel="noopener">bubbles</a>, a Claude Code plugin: install it with <code>/plugin marketplace add nateroling/bubbles</code> (instructions in its README).</footer>
 </div>
 <div id="tip" hidden></div>
 <script>window.CM_DATA = ${JSON.stringify(data).replace(/</g, '\\u003c')};</script>

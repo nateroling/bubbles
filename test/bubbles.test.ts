@@ -166,5 +166,6 @@ test('the CLI writes json, svg and html, and renders a saved map', () => {
   assert.match(art, /^<title>[^<]+ feature changes<\/title>/);
   assert.ok(!/<!doctype|<html|<head>|<body>|<\/body>|<\/html>/i.test(art), 'an artifact page has no document skeleton');
   assert.match(art, /<script>window\.CM_DATA = /);
+  assert.match(art, /href="https:\/\/github\.com\/nateroling\/bubbles"/);
   assert.throws(() => run('map', repo, '--bogus', '1'), /unknown option --bogus/);
 });
