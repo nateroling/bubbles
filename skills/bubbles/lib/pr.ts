@@ -5,7 +5,7 @@
 // stays put. Deleted files stay on the map as ghosts where they were; a file renamed into another
 // folder gets an arc from its old spot to its new one.
 
-import { replay, type CodeMap, type LayoutOptions, snapshotOf, toMap } from './layout.ts';
+import { cleanPath, replay, type CodeMap, type LayoutOptions, snapshotOf, toMap } from './layout.ts';
 import { commitInfo, diff, git, revParse, tryGit } from './git.ts';
 import type { FileMark, Ghost, Arc, Overlay } from './render.ts';
 import { applyChanges, cloneTree } from './tree.ts';
@@ -52,7 +52,10 @@ export function changeMap(repo: string, baseRef: string, headRef: string, opts: 
   const { snap, ids } = snapshotOf(tree, e.name);
   const scene = e.dots.step(snap, ids);
   const info = commitInfo(e.repo, head);
-  const map = toMap({ snap, scene, dots: e.dots, name: e.name }, info, e.opts.every!);
+  const map = toMap({ snap, scene, dots: e.dots, name: e.name }, info, e.opts.every!, opts.path);
+  const dir = cleanPath(opts.path);
+  const [ox, oy] = map.origin ?? [0, 0];
+  const inside = (p: string) => !dir || p.startsWith(dir + '/');
 
   const files: Record<string, FileMark> = {};
   const ghosts: Ghost[] = [];
@@ -65,11 +68,12 @@ export function changeMap(repo: string, baseRef: string, headRef: string, opts: 
   const name = (p: string) => p.slice(p.lastIndexOf('/') + 1);
   const at = new Map(map.files.map((f) => [f.path, f]));
   for (const ch of changes) {
+    if (!inside(ch.path)) continue; // outside the folder being mapped
     if (ch.type === 'D') {
       const id = pathBefore.get(ch.path);
       const b = id !== undefined ? before.get(id) : undefined;
       counts.deleted++;
-      if (b) ghosts.push({ path: ch.path, x: b.x, y: b.y, r: b.r, tone: 'deleted', label: name(ch.path), badge: badge(ch.path), note: 'deleted' });
+      if (b) ghosts.push({ path: ch.path, x: b.x - ox, y: b.y - oy, r: b.r, tone: 'deleted', label: name(ch.path), badge: badge(ch.path), note: 'deleted' });
       continue;
     }
     if (!at.has(ch.path)) continue;
@@ -87,13 +91,13 @@ export function changeMap(repo: string, baseRef: string, headRef: string, opts: 
       const id = pathBefore.get(ch.oldPath!);
       const b = id !== undefined ? before.get(id) : undefined;
       const now = at.get(ch.path)!;
-      if (b && Math.hypot(b.x - now.x, b.y - now.y) > 1) arcs.push({ from: [b.x, b.y], to: ch.path, tone: 'renamed', note: `${ch.oldPath} → ${ch.path}` });
+      if (b && Math.hypot(b.x - ox - now.x, b.y - oy - now.y) > 1) arcs.push({ from: [b.x - ox, b.y - oy], to: ch.path, tone: 'renamed', note: `${ch.oldPath} → ${ch.path}` });
     }
   }
   const parts = (Object.keys(counts) as (keyof typeof counts)[]).filter((k) => counts[k]).map((k) => `${counts[k]} ${k}`);
   const overlay: Overlay = {
     title: opts.title ?? info.subject,
-    subtitle: `${parts.join(', ') || 'no file changes'} against ${baseRef} (merge base ${base.slice(0, 7)}).`,
+    subtitle: `${parts.join(', ') || 'no file changes'}${dir ? ` in ${dir}/` : ''} against ${baseRef} (merge base ${base.slice(0, 7)}).`,
     link: opts.link,
     files,
     ghosts,

@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mapAt, type CodeMap } from '../skills/bubbles/lib/layout.ts';
 import { changeMap } from '../skills/bubbles/lib/pr.ts';
-import { renderHtml, renderSvg } from '../skills/bubbles/lib/render.ts';
+import { applyRules, globMatcher, renderHtml, renderSvg } from '../skills/bubbles/lib/render.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'skills', 'bubbles', 'bubbles.ts');
@@ -168,4 +168,38 @@ test('the CLI writes json, svg and html, and renders a saved map', () => {
   assert.match(art, /<script>window\.CM_DATA = /);
   assert.match(art, /href="https:\/\/github\.com\/nateroling\/bubbles"/);
   assert.throws(() => run('map', repo, '--bogus', '1'), /unknown option --bogus/);
+});
+
+test('a folder map is exactly that folder of the whole-repo map, moved to its own origin', () => {
+  for (const sha of [shas[15], shas[30], 'HEAD']) {
+    const whole = mapAt(repo, sha, { cacheDir: null });
+    const part = mapAt(repo, sha, { cacheDir: null, path: './src/' });
+    assert.equal(part.root, 'src');
+    const at = new Map(whole.files.map((f) => [f.path, f]));
+    assert.deepEqual(part.files.map((f) => f.path), whole.files.filter((f) => f.path.startsWith('src/')).map((f) => f.path));
+    for (const f of part.files) {
+      const w = at.get(f.path)!;
+      assert.ok(Math.abs(f.x + part.origin![0] - w.x) < 0.02 && Math.abs(f.y + part.origin![1] - w.y) < 0.02, f.path);
+    }
+    assert.equal(part.folders[0].path, 'src');
+    assert.equal(part.folders[0].depth, 1);
+  }
+  assert.throws(() => mapAt(repo, 'HEAD', { cacheDir: null, path: 'nope' }), /not a folder/);
+});
+
+test('colour rules: globs by name, by path and by folder; explicit marks win', () => {
+  const P = ['src/a/Button.stories.tsx', 'src/a/Button.tsx', '.storybook/main.ts', 'docs/x.md', 'src/docs/y.md', 'Cargo.toml', 'crates/a/Cargo.toml'];
+  const hits = (p: string) => P.filter(globMatcher(p));
+  assert.deepEqual(hits('*.stories.*'), ['src/a/Button.stories.tsx']);
+  assert.deepEqual(hits('.storybook/'), ['.storybook/main.ts']);
+  assert.deepEqual(hits('docs/'), ['docs/x.md']);
+  assert.deepEqual(hits('docs'), ['docs/x.md', 'src/docs/y.md']);
+  assert.deepEqual(hits('src/**/*.{ts,tsx}'), ['src/a/Button.stories.tsx', 'src/a/Button.tsx']);
+  assert.deepEqual(hits('Cargo.toml'), ['Cargo.toml', 'crates/a/Cargo.toml']);
+  const m = mapAt(repo, 'HEAD', { cacheDir: null });
+  const o = applyRules(m, { files: { 'README.md': { tone: 'hot' } }, rules: [{ match: '*.md', color: 'green', label: 'docs' }, { match: 'src/core/', tone: 'blue' }] });
+  assert.equal(o.files!['README.md'].tone, 'hot');
+  assert.equal(o.files!['guide/d4.md'].group, 'docs');
+  assert.equal(o.files!['src/core/f1.ts'].group, 'src/core/');
+  assert.match(renderSvg(m, { rules: [{ match: '*.md', color: 'green' }] }), /var\(--green\)/);
 });

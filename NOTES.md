@@ -28,3 +28,14 @@
   "ripgrep code map"); `--page-title` overrides.
 - **Installing**: SKILL.md looks for `codemap.ts` beside itself, else clones this repo to `~/.cache/bubbles`,
   so the same SKILL.md works copied into `~/.claude/skills/bubbles/` or saved as an account skill alone.
+- **Folder maps (`--path`)** crop the whole-repo map rather than laying the folder out on its own. Every folder
+  is laid out in its own frame and only moves as a whole inside its parent, so the crop is exactly the folder's
+  region of the full map. It is then moved so the folder's anchor is at (0, 0), which also hides the folder
+  drifting inside its parent: on ripgrep, over steps of 200 commits, files in crates/core move 2.0 units on the
+  folder map against 4.8 on the full map. The cost is that the whole repo is still replayed. Folder depth is
+  renumbered from the folder; base colours are worked out within the folder.
+- **Colour rules** (`--color PATTERN=COLOR[=LABEL]`, overlay `rules`): gitignore-like globs; a pattern without a
+  slash matches file names anywhere, a bare name with no wildcard also matches a folder of that name anywhere.
+  First matching rule wins; explicit `files` marks (and PR marks) win over rules. Colour names (green, blue...)
+  map to theme-aware palette colours rather than CSS's literal ones. Everything uncoloured fades, as for a PR.
+

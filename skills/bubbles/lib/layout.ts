@@ -27,6 +27,7 @@ export interface LayoutOptions {
   params?: Partial<DotParams>;
   cacheDir?: string | null; // null: no cache; default <git dir>/bubbles
   name?: string; // repo label (default: the work tree's folder name)
+  path?: string; // map only this folder (repo-relative); the layout is still the whole repo's, cropped
   log?: (msg: string) => void;
 }
 
@@ -58,6 +59,8 @@ export interface CodeMap {
   every: Every;
   params: DotParams;
   bounds: [number, number, number, number];
+  root?: string; // set when the map is cropped to a folder: its path
+  origin?: [number, number]; // ...and that folder's anchor in the whole-repo map, subtracted from every coordinate
   files: MapFile[]; // sorted by path
   folders: MapFolder[]; // parents before children
 }
@@ -163,8 +166,57 @@ export function replay(repoPath: string, ref = 'HEAD', opts: LayoutOptions = {})
   return { repo, name, tree, dots, ...last, opts: { ...opts, every } };
 }
 
-/** Turn a laid-out snapshot into the map file. */
-export function toMap(e: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'>, info: { sha: string; date: string; subject: string }, every: Every): CodeMap {
+/** Normalise a folder path given by a person: no leading ./ or /, no trailing slash; '' = the whole repo. */
+export const cleanPath = (p: string | undefined) => (p ?? '').replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/^\/+|\/+$/g, '').replace(/^\.$/, '');
+
+/** A folder's anchor in whole-repo coordinates: the sum of its and its ancestors' offsets (the root is pinned at 0, 0). */
+export function anchorOf(dots: DotCells, dir: string): [number, number] {
+  let x = 0;
+  let y = 0;
+  const parts = dir.split('/');
+  for (let k = 1; k <= parts.length; k++) {
+    const o = dots.off.get(parts.slice(0, k).join('/'));
+    if (!o) throw new Error(`bubbles: no folder ${parts.slice(0, k).join('/')}`);
+    x += o[0];
+    y += o[1];
+  }
+  return [x, y];
+}
+
+/**
+ * The map of one folder: the whole-repo map cropped to the folder, moved so the folder's anchor is at (0, 0).
+ * Every folder is laid out in its own frame and only ever moves as a whole inside its parent, so this is
+ * exactly the folder's region of the whole-repo map, and it holds still even when the folder shifts there.
+ */
+export function cropMap(map: CodeMap, dir: string, origin: [number, number]): CodeMap {
+  const [ox, oy] = origin;
+  const inside = (p: string) => p === dir || p.startsWith(dir + '/');
+  const files = map.files.filter((f) => inside(f.path)).map((f) => ({ ...f, x: round(f.x - ox), y: round(f.y - oy) }));
+  if (!files.length) throw new Error(`bubbles: no files under ${dir}/`);
+  const top = map.folders.find((f) => f.path === dir)!;
+  const shift = top.depth - 1;
+  const folders = map.folders
+    .filter((f) => inside(f.path))
+    .map((f) => ({
+      ...f,
+      depth: f.depth - shift,
+      outline: f.outline.map((r) => r.map((v, i) => round(v - (i % 2 ? oy : ox)))),
+      bbox: [round(f.bbox[0] - ox), round(f.bbox[1] - oy), round(f.bbox[2] - ox), round(f.bbox[3] - oy)] as MapFolder['bbox'],
+      label: [round(f.label[0] - ox), round(f.label[1] - oy)] as [number, number],
+    }));
+  const b = folders.find((f) => f.path === dir)!.bbox;
+  return { ...map, bounds: [...b], root: dir, origin: [round(ox), round(oy)], files, folders };
+}
+
+/** Turn a laid-out snapshot into the map file (cropped to `path` when given). */
+export function toMap(e: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'>, info: { sha: string; date: string; subject: string }, every: Every, path = ''): CodeMap {
+  const dir = cleanPath(path);
+  if (dir && !e.snap.dirs.some((d) => d.path === dir)) throw new Error(`bubbles: ${dir} is not a folder at ${info.sha.slice(0, 7)}`);
+  const whole = toWholeMap(e, info, every);
+  return dir ? cropMap(whole, dir, anchorOf(e.dots, dir)) : whole;
+}
+
+function toWholeMap(e: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'>, info: { sha: string; date: string; subject: string }, every: Every): CodeMap {
   const { snap, scene } = e;
   const files: MapFile[] = scene.marks.map((m) => ({ path: snap.files[m.f].path, x: round(m.x), y: round(m.y), r: round(m.r), size: snap.files[m.f].size }));
   const chains = scene.marks.map((m) => {
@@ -192,5 +244,5 @@ export function toMap(e: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'>, info:
 /** The stable map of a repo at a commit. */
 export function mapAt(repo: string, ref = 'HEAD', opts: LayoutOptions = {}): CodeMap {
   const e = replay(repo, ref, opts);
-  return toMap(e, commitInfo(e.repo, ref), opts.every ?? 'week');
+  return toMap(e, commitInfo(e.repo, ref), opts.every ?? 'week', opts.path);
 }

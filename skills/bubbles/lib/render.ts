@@ -8,7 +8,7 @@ import type { CodeMap } from './layout.ts';
 import { buildSnapshot, cmp } from './snapshot.ts';
 
 /** Named colours that follow the page's light/dark theme. Anything else is used as a CSS colour. */
-export const TONES = ['added', 'modified', 'deleted', 'renamed', 'hot', 'warm', 'cool', 'muted'] as const;
+export const TONES = ['added', 'modified', 'deleted', 'renamed', 'hot', 'warm', 'cool', 'muted', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'brown', 'gray', 'grey'] as const;
 
 export interface Paint {
   tone?: string; // one of TONES
@@ -40,12 +40,21 @@ export interface Arc extends Paint {
   note?: string;
 }
 
+/** Colour every file whose path matches a glob: `*.stories.*` (no slash: matches the file name anywhere),
+ *  `src/**\/*.test.ts` (with a slash: matches the repo-relative path), `docs/` or `docs` (a folder and everything in it).
+ *  `*` stays within one folder, `**` crosses folders, `?` is one character, `{a,b}` is either. */
+export interface Rule extends Paint {
+  match: string;
+  label?: string; // legend and list heading (default: the pattern)
+}
+
 export interface Overlay {
   title?: string;
   subtitle?: string;
   link?: string; // e.g. the PR's URL, shown under the title
   dim?: boolean; // fade the base map (default: true when the overlay marks anything)
   files?: Record<string, FileMark>;
+  rules?: Rule[]; // the first matching rule colours a file the `files` entries don't mention
   ghosts?: Ghost[];
   arcs?: Arc[];
   legend?: ({ label: string } & Paint)[];
@@ -54,7 +63,13 @@ export interface Overlay {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const n2 = (v: number) => String(Math.round(v * 100) / 100);
-const paint = (p: Paint, fallback = 'var(--hot)') => (p.color ? esc(p.color) : p.tone && (TONES as readonly string[]).includes(p.tone) ? `var(--${p.tone})` : fallback);
+const isTone = (t: string | undefined): t is string => !!t && (TONES as readonly string[]).includes(t.toLowerCase());
+const toneVar = (t: string) => {
+  const k = t.toLowerCase();
+  return `var(--${k === 'muted' ? 'muted-tone' : k === 'grey' ? 'gray' : k})`;
+};
+/** A colour name that is also a tone (green, blue...) uses the theme's version, so it reads in light and dark. */
+const paint = (p: Paint, fallback = 'var(--hot)') => (p.color ? (isTone(p.color) ? toneVar(p.color) : esc(p.color)) : isTone(p.tone) ? toneVar(p.tone) : fallback);
 export const fmtSize = (b: number) => (b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(1) + ' MB');
 
 // ---- theme ----
@@ -62,11 +77,13 @@ export const fmtSize = (b: number) => (b < 1024 ? b + ' B' : b < 1048576 ? (b / 
 const LIGHT =
   '--bg:#eef1ec;--panel:#f8faf6;--ink:#1d2a22;--muted:#5b6a60;--rule:#d3dbd2;--accent:#2f7d55;--neutral:#8b978e;' +
   '--g0:#d1495b;--g1:#edae49;--g2:#00798c;--g3:#6a4c93;--g4:#3c8d2f;--g5:#e07a3f;--g6:#4d8fd6;--g7:#b5527f;--g8:#8d7b2a;--g9:#9aa39c;' +
-  '--added:#2b8a3e;--modified:#e8590c;--deleted:#c2255c;--renamed:#1971c2;--hot:#e03131;--warm:#f08c00;--cool:#1c7ed6;--muted-tone:#868e96;';
+  '--added:#2b8a3e;--modified:#e8590c;--deleted:#c2255c;--renamed:#1971c2;--hot:#e03131;--warm:#f08c00;--cool:#1c7ed6;--muted-tone:#868e96;' +
+  '--red:#e03131;--orange:#f76707;--yellow:#e8b100;--green:#2f9e44;--teal:#0c8599;--blue:#1c7ed6;--purple:#7048e8;--pink:#d6336c;--brown:#8d6e4f;--gray:#868e96;';
 const DARK =
   '--bg:#0f1512;--panel:#151d18;--ink:#e3ebe4;--muted:#95a59a;--rule:#26332b;--accent:#6cc293;--neutral:#6f7c73;' +
   '--g0:#ef6f7f;--g1:#f2bf62;--g2:#2cb3c4;--g3:#a183cf;--g4:#6dc05c;--g5:#f09a5f;--g6:#78adf0;--g7:#d77ba4;--g8:#c4b058;--g9:#6f7a72;' +
-  '--added:#69db7c;--modified:#ffa94d;--deleted:#f783ac;--renamed:#74c0fc;--hot:#ff6b6b;--warm:#ffd43b;--cool:#4dabf7;--muted-tone:#adb5bd;';
+  '--added:#69db7c;--modified:#ffa94d;--deleted:#f783ac;--renamed:#74c0fc;--hot:#ff6b6b;--warm:#ffd43b;--cool:#4dabf7;--muted-tone:#adb5bd;' +
+  '--red:#ff6b6b;--orange:#ff922b;--yellow:#ffd43b;--green:#69db7c;--teal:#3bc9db;--blue:#4dabf7;--purple:#9775fa;--pink:#f783ac;--brown:#c0a080;--gray:#adb5bd;';
 
 /** Theme tokens: light on :root, dark under the OS setting and under an explicit data-theme. */
 export const THEME_CSS = `:root{${LIGHT}}
@@ -260,7 +277,52 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
 }
 
 /** A static SVG file. */
+/** A glob as a matcher over repo-relative paths (see Rule). */
+export function globMatcher(pattern: string): (path: string) => boolean {
+  let p = pattern.trim().replace(/^\.\//, '');
+  const hasGlob = /[*?{]/.test(p);
+  if (p.endsWith('/')) p += '**';
+  else if (!hasGlob && p.includes('/')) p += '{,/**}';
+  const byName = !p.includes('/');
+  let re = '';
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === '*' && p[i + 1] === '*') {
+      if (p[i + 2] === '/') {
+        re += '(?:.*/)?';
+        i += 2;
+      } else {
+        re += '.*';
+        i += 1;
+      }
+    } else if (c === '*') re += '[^/]*';
+    else if (c === '?') re += '[^/]';
+    else if (c === '{') re += '(?:';
+    else if (c === '}') re += ')';
+    else if (c === ',' && re.lastIndexOf('(?:') > re.lastIndexOf(')')) re += '|';
+    else re += c.replace(/[.+^$()|[\]\\]/g, '\\$&');
+  }
+  const rx = new RegExp(`^${re}$`);
+  if (byName && hasGlob) return (path) => rx.test(path.slice(path.lastIndexOf('/') + 1));
+  if (byName) return (path) => path.slice(path.lastIndexOf('/') + 1) === p || path === p || path.startsWith(p + '/') || path.includes('/' + p + '/');
+  return (path) => rx.test(path);
+}
+
+/** Turn an overlay's rules into per-file marks (explicit `files` entries win). */
+export function applyRules(map: CodeMap, overlay: Overlay): Overlay {
+  if (!overlay.rules?.length) return overlay;
+  const rules = overlay.rules.map((r) => ({ r, m: globMatcher(r.match) }));
+  const files: Record<string, FileMark> = { ...overlay.files };
+  for (const f of map.files) {
+    if (files[f.path]) continue;
+    const hit = rules.find((x) => x.m(f.path));
+    if (hit) files[f.path] = { tone: hit.r.tone, color: hit.r.color, group: hit.r.label ?? hit.r.match, label: f.path.slice(f.path.lastIndexOf('/') + 1) };
+  }
+  return { ...overlay, files };
+}
+
 export function renderSvg(map: CodeMap, overlay: Overlay = {}, opt: SvgOptions = {}): string {
+  overlay = applyRules(map, overlay);
   return prepare(map, overlay, { ...opt, standalone: true }).svg + '\n';
 }
 
@@ -428,8 +490,9 @@ export interface HtmlOptions {
 
 /** A self-contained HTML page (opens from disk, or publishes as an Artifact; fonts from Google Fonts when online). */
 export function renderHtml(map: CodeMap, overlay: Overlay = {}, opt: HtmlOptions = {}): string {
+  overlay = applyRules(map, overlay);
   const { svg, data } = prepare(map, overlay, { standalone: false });
-  const title = overlay.title ?? `${map.repo} code map`;
+  const title = overlay.title ?? `${map.repo}${map.root ? "/" + map.root : ""} code map`;
   const marks = overlay.files ?? {};
   const index = new Map(map.files.map((f, i) => [f.path, i]));
 
@@ -473,7 +536,7 @@ export function renderHtml(map: CodeMap, overlay: Overlay = {}, opt: HtmlOptions
   const showList = (overlay.list ?? true) && rows.size > 0;
   if (showList) list = `<aside aria-label="Marked files">${sortGroups([...rows]).map(([g, r]) => `<h2>${esc(g)} · ${r.length}</h2><ul>${r.join('')}</ul>`).join('')}</aside>`;
 
-  const eyebrow = `${map.repo} · ${map.commit.slice(0, 7)} · ${map.date} · ${map.files.length.toLocaleString('en')} files`;
+  const eyebrow = `${map.repo}${map.root ? "/" + map.root + "/" : ""} · ${map.commit.slice(0, 7)} · ${map.date} · ${map.files.length.toLocaleString('en')} files`;
   const sub = overlay.subtitle ?? (Object.keys(marks).length ? '' : map.subject);
   const page = `<!doctype html>
 <html lang="en">

@@ -24,6 +24,8 @@ const USAGE = `usage:
   node bubbles.ts render MAP.json [--overlay FILE] [--out FILE]...
 options: --every week|day|commit  --no-cache  --cache DIR  --name LABEL  --quiet
          --artifact (.html as an Artifact page body)  --page-title TITLE
+         --path DIR (map one folder; it looks exactly as it does in the whole-repo map)
+         --color PATTERN=COLOR[=LABEL] (repeatable; e.g. '*.stories.*=green', 'docs/=blue=Docs')
 --out: .html (default), .svg or .json; repeat for several.`;
 
 const argv = process.argv.slice(2);
@@ -49,7 +51,7 @@ if (!cmd || cmd === '--help' || cmd === 'help' || opts.has('--help')) {
   console.log(USAGE);
   process.exit(0);
 }
-const known = new Set(['--ref', '--overlay', '--out', '--pr', '--head', '--base', '--title', '--link', '--every', '--no-cache', '--cache', '--name', '--quiet', '--remote', '--artifact', '--page-title']);
+const known = new Set(['--ref', '--overlay', '--out', '--pr', '--head', '--base', '--title', '--link', '--every', '--no-cache', '--cache', '--name', '--quiet', '--remote', '--artifact', '--page-title', '--path', '--color']);
 for (const k of opts.keys()) if (!known.has(k)) fail(`unknown option ${k}`);
 const every = (one('--every') ?? 'week') as Every;
 if (!['week', 'day', 'commit'].includes(every)) fail('--every must be week, day or commit');
@@ -58,9 +60,20 @@ const lopts: LayoutOptions = {
   every,
   cacheDir: opts.has('--no-cache') ? null : one('--cache'),
   name: one('--name'),
+  path: one('--path'),
   log: quiet ? undefined : (m) => console.error(`bubbles: ${m}`),
 };
-const readOverlay = (): Overlay => (one('--overlay') ? (JSON.parse(readFileSync(resolve(one('--overlay')!), 'utf8')) as Overlay) : {});
+const rules = (opts.get('--color') ?? []).map((c) => {
+  const [match, color, ...label] = c.split('=');
+  if (!match || !color) fail(`--color takes PATTERN=COLOR[=LABEL], got ${c}`);
+  return { match, color, ...(label.length ? { label: label.join('=') } : {}) };
+});
+const readOverlay = (): Overlay => {
+  const o: Overlay = one('--overlay') ? (JSON.parse(readFileSync(resolve(one('--overlay')!), 'utf8')) as Overlay) : {};
+  if (one('--title')) o.title = one('--title');
+  if (one('--link')) o.link = one('--link');
+  return rules.length ? { ...o, rules: [...(o.rules ?? []), ...rules] } : o;
+};
 
 function write(map: CodeMap, overlay: Overlay, stem: string, pageTitle: string, extra?: object) {
   const outs = opts.get('--out') ?? [`${stem}.html`];
@@ -79,7 +92,7 @@ try {
   if (cmd === 'map') {
     const repo = resolve(pos[0] ?? '.');
     const map = mapAt(repo, one('--ref') ?? 'HEAD', lopts);
-    write(map, readOverlay(), `bubbles-${map.repo}-${map.commit.slice(0, 7)}`, `${map.repo} code map`);
+    write(map, readOverlay(), `bubbles-${map.repo}-${map.commit.slice(0, 7)}`, `${map.repo}${map.root ? "/" + map.root : ""} code map`);
   } else if (cmd === 'pr') {
     const repo = resolve(pos[0] ?? '.');
     const pr = one('--pr');
@@ -102,7 +115,7 @@ try {
     const base: Overlay = raw.format ? {} : (raw.overlay ?? {});
     const extra = readOverlay();
     const overlay: Overlay = { ...base, ...extra, files: { ...base.files, ...extra.files }, ghosts: [...(base.ghosts ?? []), ...(extra.ghosts ?? [])], arcs: [...(base.arcs ?? []), ...(extra.arcs ?? [])] };
-    write(map, overlay, basename(pos[0], extname(pos[0])), overlay.title ?? `${map.repo} code map`);
+    write(map, overlay, basename(pos[0], extname(pos[0])), overlay.title ?? `${map.repo}${map.root ? "/" + map.root : ""} code map`);
   } else fail(`unknown command ${cmd}`);
 } catch (e) {
   const err = e as Error & { stderr?: Buffer | string };

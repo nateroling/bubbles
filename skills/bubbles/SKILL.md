@@ -25,11 +25,29 @@ Below, `bubbles` means `node <that path>`. Check `node --version` first; older N
 ## Commands
 
 ```sh
-bubbles map    [repo] [--ref REF] [--overlay FILE] [--out FILE]...      # the map at a commit (default HEAD)
+bubbles map    [repo] [--ref REF] [--title T] [--overlay FILE] [--out FILE]...  # the map at a commit (default HEAD)
 bubbles pr     [repo] --pr N [--base REF] [--title T] [--link URL] [--out FILE]...   # a GitHub PR
 bubbles pr     [repo] --head REF [--base REF] [--out FILE]...           # any branch or commit
 bubbles render MAP.json [--overlay FILE] [--out FILE]...                # draw a saved map with an overlay
 ```
+
+`map` and `pr` also take `--path DIR` (map one folder) and `--color PATTERN=COLOR[=LABEL]` (repeatable).
+
+## Reading a request
+
+Requests come in plain words, like "/bubbles src and make storybook files green". Turn them into options:
+
+- A folder ("src", "the api package") is `--path src`. A folder map is exactly that folder's part of the
+  whole-repo map (every folder is laid out on its own and only moves as a whole), moved so the folder sits at
+  its own origin. It looks the same as in the full map, and holds still even when the folder shifts there.
+- "Make X files COLOR" is `--color 'PATTERN=COLOR=Label'`, one per kind of file, first match wins. Pick globs
+  that fit the repo; look at its file names first (`git ls-files | grep -i story | head`). Examples:
+  storybook files `'*.stories.*=green=Stories'` plus `'.storybook/=green=Stories'`; tests `'*.test.*=blue=Tests'`,
+  `'*_test.go=blue=Tests'`, `'**/tests/**=blue=Tests'`; config `'*.{json,yml,yaml,toml}=gray=Config'`;
+  docs `'*.md=purple=Docs'`; a folder `'src/api/=orange=API'`.
+- Colour names red, orange, yellow, green, teal, blue, purple, pink, brown and gray use the page's theme-aware
+  versions; any other CSS colour (`#7048e8`) is used as is. Everything not coloured fades into the background.
+- A PR ("show PR 123 in src/api") combines: `pr --pr 123 --path src/api`. PR marks win over colour rules.
 
 - `--out` picks the format from the extension: `.html` is an interactive page (pan, zoom, hover, a list of
   marked files; one self-contained file with the map and layers baked in), `.svg` is a static picture,
@@ -67,14 +85,21 @@ An overlay is JSON. Everything is optional; paths are repo-relative, as in the m
     "src/main.rs": { "tone": "hot", "label": "main.rs", "badge": "42 commits", "note": "tooltip line", "group": "hottest" },
     "src/lib.rs": { "color": "#7048e8", "badge": "17 commits" }
   },
+  "rules": [{ "match": "*.stories.*", "color": "green", "label": "Stories" }],
   "ghosts": [{ "path": "old/gone.rs", "x": 3.2, "y": -1.5, "r": 0.6, "tone": "deleted" }],
   "arcs": [{ "from": "src/main.rs", "to": "src/lib.rs", "tone": "cool", "width": 2, "note": "calls" }],
   "legend": [{ "tone": "hot", "label": "most commits" }]
 }
 ```
 
-- `tone` is a theme-aware colour: `added`, `modified`, `deleted`, `renamed`, `hot`, `warm`, `cool`, `muted`.
-  `color` takes any CSS colour instead.
+- `tone` is a theme-aware colour: `added`, `modified`, `deleted`, `renamed`, `hot`, `warm`, `cool`, `muted`,
+  or a colour name (red, orange, yellow, green, teal, blue, purple, pink, brown, gray). `color` takes any CSS
+  colour instead (colour names still get the theme-aware version).
+- `rules` colour every file whose path matches a glob; the first match wins, and `files` entries win over
+  rules. A pattern without a slash matches file names anywhere (`*.stories.*`, `Cargo.toml`); with a slash it
+  matches the repo-relative path (`src/**/*.test.ts`); a trailing slash means a folder and everything in it
+  (`docs/`). `*` stays in one folder, `**` crosses folders, `?` is one character, `{a,b}` is either.
+  `--color` adds rules from the command line.
 - Marked files are drawn on top with a ring and listed beside the map, grouped by `group` (default: the
   tone's name), with `badge` on the right. `label` names the dot when zoomed in.
 - `dim` fades the base map (default: on whenever the overlay marks anything).
@@ -89,11 +114,14 @@ also take `--overlay`, merged over their own marks.
 
 ```
 { format, repo, commit, date, subject, every, params, bounds: [x0, y0, x1, y1],
+  root, origin,                                                // only for a --path map: the folder, and its anchor
+                                                               // in the whole-repo map (subtracted from every x, y)
   files:   [{ path, x, y, r, size }],                          // sorted by path; y points down
   folders: [{ path, depth, files, outline: [[x0, y0, x1, y1, ...], ...], bbox, label: [x, y] }] }
 ```
 
-Units are arbitrary but stable; the root is pinned at (0, 0). A folder's `outline` rings are filled with the
+Units are arbitrary but stable; the root (or, for a `--path` map, the folder) is pinned at (0, 0), and in a
+`--path` map `depth` counts from the folder (depth 1). A folder's `outline` rings are filled with the
 even-odd rule; `label` is the top of its cell. Parents come before children in `folders`.
 
 ## Delivering the result
