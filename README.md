@@ -48,6 +48,8 @@ option, the overlay format and the map format (`bubbles/1`).
 
 ## How it works
 
+All paths below are in `skills/bubbles/`.
+
 - `lib/git.ts`: the first-parent history and diffs, read with the git command line.
 - `lib/tree.ts`: what exists at a commit; a renamed file keeps its identity.
 - `lib/dots.ts`: the layout. Each folder lays out its own files (as one clump in the middle) and its
