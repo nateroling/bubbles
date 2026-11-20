@@ -6,26 +6,40 @@ from the repository's history and holds still as the code grows: files keep thei
 take the nearest free spot in their folder. That makes it a base map that other data can be drawn on, such
 as the files a pull request changes.
 
-It is a Claude Code skill (`SKILL.md`) and a command-line tool (`bubbles.ts`). Node 22.18+ and git; no
+It is a Claude Code plugin with one skill (`skills/bubbles/SKILL.md`) and a command-line tool
+(`skills/bubbles/bubbles.ts`). Node 22.18+ and git; no
 dependencies, nothing to install.
 
 Demo: ripgrep PR #2483 on its map, https://claude.ai/artifact/CWN6z14TETzgAn7XmXonJ4
 
-## Install the skill
+## Install
 
-```sh
-git clone https://github.com/nateroling/bubbles ~/.claude/skills/bubbles
+As a Claude Code plugin (updatable):
+
+```
+/plugin marketplace add nateroling/bubbles
+/plugin install bubbles@bubbles
 ```
 
-Or save `SKILL.md` alone as a skill: when `bubbles.ts` is not beside it, it clones this repo to
-`~/.cache/bubbles` and runs from there.
+Get new versions with `/plugin marketplace update bubbles`, or turn on auto-update for the marketplace in
+`/plugin`. The skill shows up as `bubbles:bubbles`.
+
+Or as a plain skill, without the plugin system:
+
+```sh
+git clone https://github.com/nateroling/bubbles ~/src/bubbles
+ln -s ~/src/bubbles/skills/bubbles ~/.claude/skills/bubbles   # update with: git -C ~/src/bubbles pull
+```
+
+Or save `skills/bubbles/SKILL.md` alone as a skill: when `bubbles.ts` is not beside it, it clones this repo
+to `~/.cache/bubbles` and runs from there.
 
 ## Use it directly
 
 ```sh
-node bubbles.ts map    [repo] [--ref REF] [--overlay FILE] [--out FILE]...
-node bubbles.ts pr     [repo] (--pr N | --head REF) [--base REF] [--title T] [--link URL] [--out FILE]...
-node bubbles.ts render MAP.json [--overlay FILE] [--out FILE]...
+node skills/bubbles/bubbles.ts map    [repo] [--ref REF] [--overlay FILE] [--out FILE]...
+node skills/bubbles/bubbles.ts pr     [repo] (--pr N | --head REF) [--base REF] [--title T] [--link URL] [--out FILE]...
+node skills/bubbles/bubbles.ts render MAP.json [--overlay FILE] [--out FILE]...
 ```
 
 `--out` picks the format from its extension: `.html` (interactive page), `.svg` (static picture) or `.json`

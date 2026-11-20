@@ -1,0 +1,9 @@
+{
+  "name": "bubbles",
+  "version": "0.1.0",
+  "description": "A stable spatial map of a git repository (files as dots, folders as nested cells) with overlays, such as the files a pull request changes.",
+  "author": { "name": "Nate" },
+  "homepage": "https://github.com/nateroling/bubbles",
+  "repository": "https://github.com/nateroling/bubbles",
+  "keywords": ["visualization", "git", "code-map", "pull-request"]
+}

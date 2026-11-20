@@ -10,3 +10,7 @@
 - Keep `SKILL.md` in step with the CLI: every option and both file formats are documented there.
 - Tests: `npm test` (node:test, `test/*.test.ts`), on temp repos built with real git.
 - Taste or judgment calls: make a reasonable default, note it in NOTES.md, keep going.
+- Layout: the plugin is the repo root (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`); the skill,
+  CLI and `lib/` live in `skills/bubbles/`.
+- Releasing: installed plugins are cached by version, so bump `version` in BOTH `.claude-plugin/plugin.json` and
+  `.claude-plugin/marketplace.json` for any change users should get. Check with `claude plugin validate .`.

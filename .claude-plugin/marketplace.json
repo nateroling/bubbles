@@ -1,0 +1,15 @@
+{
+  "name": "bubbles",
+  "owner": {
+    "name": "Nate"
+  },
+  "description": "Bubbles: a stable code map skill for Claude Code.",
+  "plugins": [
+    {
+      "name": "bubbles",
+      "source": "./",
+      "description": "A stable spatial map of a git repository (files as dots, folders as nested cells) with overlays, such as the files a pull request changes.",
+      "version": "0.1.0"
+    }
+  ]
+}

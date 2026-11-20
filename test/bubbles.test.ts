@@ -8,12 +8,12 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mapAt, type CodeMap } from '../lib/layout.ts';
-import { changeMap } from '../lib/pr.ts';
-import { renderHtml, renderSvg } from '../lib/render.ts';
+import { mapAt, type CodeMap } from '../skills/bubbles/lib/layout.ts';
+import { changeMap } from '../skills/bubbles/lib/pr.ts';
+import { renderHtml, renderSvg } from '../skills/bubbles/lib/render.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const CLI = join(ROOT, 'bubbles.ts');
+const CLI = join(ROOT, 'skills', 'bubbles', 'bubbles.ts');
 const ENV = {
   ...process.env,
   GIT_CONFIG_GLOBAL: '/dev/null',

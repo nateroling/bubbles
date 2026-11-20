@@ -16,7 +16,7 @@ every map you draw of that repo. That makes it a base map: other data goes on to
 The tool is `bubbles.ts` (Node 22.18 or newer, plus git; no install). Use the first of these that exists:
 
 1. `bubbles.ts` in the same folder as this SKILL.md.
-2. `~/.cache/bubbles/bubbles.ts`. If it is missing, run
+2. `~/.cache/bubbles/skills/bubbles/bubbles.ts`. If it is missing, run
    `git clone --depth 1 https://github.com/nateroling/bubbles ~/.cache/bubbles`; if it is there but older than a
    week, `git -C ~/.cache/bubbles pull --ff-only`.
 

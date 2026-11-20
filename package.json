@@ -5,7 +5,7 @@
   "type": "module",
   "description": "A stable spatial map of a git repository (files as dots, folders as nested cells), with overlays such as a PR's changed files. A Claude Code skill and a CLI.",
   "engines": { "node": ">=22.18" },
-  "bin": { "bubbles": "./bubbles.ts" },
+  "bin": { "bubbles": "./skills/bubbles/bubbles.ts" },
   "scripts": {
     "test": "node --test test/*.test.ts"
   }
