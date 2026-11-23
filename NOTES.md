@@ -21,8 +21,7 @@
   - **Night plate.** The stack map is drawn with the dark tokens in both themes (lights need the dark);
     the page around it follows the theme.
   - **Opens on the last step** (the whole stack at once, last PR bright); Play restarts from the base.
-  - **Base colours** of a stack come from the base (step 0), so a later step can't recolour the map; files
-    in folders that are new in the stack are grey until lit.
+  - **Base colours** come from paths alone (see below), so no step can recolour the map.
   - **Renames**: the new path is lit as renamed (note: renamed from ...); the old path just disappears
     (no ghost, no arc), unlike `pr`.
 
@@ -39,9 +38,32 @@
   the head's files; unchanged files may nudge a little in that step (on ripgrep #2483, by ~0). Deleted files are
   ghosts at their merge-base spot. A rename gets an arc only when the file moved more than 1 unit (a rename
   within a folder keeps its spot). Line counts from `git diff --numstat`.
-- **Base colours** are folder groups computed from the commit being drawn (as in the dots viewer), so a
-  colour can change between commits even though positions don't. Alternative: a hue per top-level folder from
-  its name (stable, and it would match the name-angle placement). With an overlay the base fades to ~40%.
+- **Base colours come from paths alone** (review, 2026-11-23: colours ranked by file count changed within
+  months on ripgrep, and a `map` and a `stack` disagreed). A folder's colour depends only on its path, never on
+  counts, siblings or the commit, so every map of a repo agrees (`map`, `pr`, `stack`, `render`, `--path`).
+  Calls made:
+  - **A hash, not the name angle.** Tying hue to `nameAngle` (a colour wheel laid on the map) was the first
+    idea, but siblings sit on their parent's ring in name order, so names that sort together sit together
+    and would get near-identical hues: on ripgrep `ci/` and `crates/` are 2 degrees apart, `.cargo/` and
+    `.github/` 1, and benchsuite/ci/crates/doc all within 21. No rule from the name alone can guarantee
+    neighbours differ (adjacent names differ at some character and are arbitrary after it), so a hash
+    (FNV-1a plus a murmur finaliser) picks a hue (0-359) and one of three lightnesses. By chance about one
+    sibling pair in eighteen lands close (hues within 30 degrees at the same lightness): on ripgrep 5 of 83,
+    e.g. crates/cli, crates/globset and crates/grep are all pinkish-lilac. Accepted as the price of
+    stability; a salt chosen per repo, or a hand-tuned palette, would be the knobs if it grates.
+  - **Two levels.** Each top-level folder and each folder one level inside it gets its own colour (hash of
+    the first two path segments), so ripgrep's `crates/` is ten colours, not one; deeper folders share their
+    second-level folder's colour and show as deepening cells. A second-level folder's hue is independent of
+    its parent's: a hue band around the parent (tried, +-50 degrees) left ten crates in blues and greens.
+    A `--path` map of a folder two or more levels down is therefore one colour (as on the whole map).
+  - **Theme-aware**: `oklch(var(--blN) var(--bc) H)`, three lightness tokens and a chroma token per theme
+    (light .48/.62/.76, chroma .14; dark .60/.72/.84, chroma .13), so the stack's night plate and both themes
+    work. Each distinct colour is a custom property on the map's `<svg>` (`--k0`...), keeping pages small.
+  - **Root files neutral grey.** Legend with nothing marked: top-level folders largest first, the biggest
+    split into its subfolders (never below the second level) until none holds over an eighth, capped at 10;
+    counts choose what is listed, never a colour.
+  - A stack no longer needs its base to fix colours, so folders new in a stack have their colour from the
+    start (they were grey until lit). With an overlay the base still fades to ~40%.
 - **Folder outlines** are traced (marching squares at ~1/400 of the folder's size, then simplified) from the
   same shape the viewer paints: dots grown one margin per level, plus bands between overlapping dots.
   Coordinates rounded to 0.01 in the JSON.
@@ -59,7 +81,7 @@
   region of the full map. It is then moved so the folder's anchor is at (0, 0), which also hides the folder
   drifting inside its parent: on ripgrep, over steps of 200 commits, files in crates/core move 2.0 units on the
   folder map against 4.8 on the full map. The cost is that the whole repo is still replayed. Folder depth is
-  renumbered from the folder; base colours are worked out within the folder.
+  renumbered from the folder; base colours are the whole-repo map's (they come from paths).
 - **Colour rules** (`--color PATTERN=COLOR[=LABEL]`, overlay `rules`): gitignore-like globs; a pattern without a
   slash matches file names anywhere, a bare name with no wildcard also matches a folder of that name anywhere.
   First matching rule wins; explicit `files` marks (and PR marks) win over rules. Colour names (green, blue...)

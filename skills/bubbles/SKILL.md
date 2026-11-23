@@ -11,6 +11,11 @@ parents. The layout is replayed from the repository's first-parent history, keep
 and putting new files at the nearest free spot in their folder, so the same file is in the same place on
 every map you draw of that repo. That makes it a base map: other data goes on top as an overlay.
 
+Its colours hold still too. Each top-level folder, and each folder one level inside it, has a colour that
+comes from its path alone (deeper folders share their second-level folder's colour, files their folder's,
+root files are grey). So a folder is the same colour at every commit, in `map`, `pr`, `stack` and `--path`
+maps alike, in light and dark themes. With nothing marked, the legend lists the biggest of these districts.
+
 ## Find the tool
 
 The tool is `bubbles.ts` (Node 22.18 or newer, plus git; no install). Use the first of these that exists:

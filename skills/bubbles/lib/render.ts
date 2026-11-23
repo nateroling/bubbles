@@ -3,7 +3,7 @@
 // label, badge or note per file, ghosts for files that are not on the map (say, deleted in a PR), and
 // arcs between files. The base map never changes for an overlay; it only fades so the overlay stands out.
 
-import { folderGroups } from './groups.ts';
+import { fileColour, folderColour, legendEntries } from './groups.ts';
 import type { CodeMap } from './layout.ts';
 import { buildSnapshot, cmp } from './snapshot.ts';
 
@@ -130,12 +130,12 @@ export const fmtSize = (b: number) => (b < 1024 ? b + ' B' : b < 1048576 ? (b / 
 
 const LIGHT =
   '--bg:#eef1ec;--panel:#f8faf6;--ink:#1d2a22;--muted:#5b6a60;--rule:#d3dbd2;--accent:#2f7d55;--neutral:#8b978e;' +
-  '--g0:#d1495b;--g1:#edae49;--g2:#00798c;--g3:#6a4c93;--g4:#3c8d2f;--g5:#e07a3f;--g6:#4d8fd6;--g7:#b5527f;--g8:#8d7b2a;--g9:#9aa39c;' +
+  '--bl0:.48;--bl1:.62;--bl2:.76;--bc:.14;' +
   '--added:#2b8a3e;--modified:#e8590c;--deleted:#c2255c;--renamed:#1971c2;--hot:#e03131;--warm:#f08c00;--cool:#1c7ed6;--muted-tone:#868e96;' +
   '--red:#e03131;--orange:#f76707;--yellow:#e8b100;--green:#2f9e44;--teal:#0c8599;--blue:#1c7ed6;--purple:#7048e8;--pink:#d6336c;--brown:#8d6e4f;--gray:#868e96;';
 const DARK =
   '--bg:#0f1512;--panel:#151d18;--ink:#e3ebe4;--muted:#95a59a;--rule:#26332b;--accent:#6cc293;--neutral:#6f7c73;' +
-  '--g0:#ef6f7f;--g1:#f2bf62;--g2:#2cb3c4;--g3:#a183cf;--g4:#6dc05c;--g5:#f09a5f;--g6:#78adf0;--g7:#d77ba4;--g8:#c4b058;--g9:#6f7a72;' +
+  '--bl0:.6;--bl1:.72;--bl2:.84;--bc:.13;' +
   '--added:#69db7c;--modified:#ffa94d;--deleted:#f783ac;--renamed:#74c0fc;--hot:#ff6b6b;--warm:#ffd43b;--cool:#4dabf7;--muted-tone:#adb5bd;' +
   '--red:#ff6b6b;--orange:#ff922b;--yellow:#ffd43b;--green:#69db7c;--teal:#3bc9db;--blue:#4dabf7;--purple:#9775fa;--pink:#f783ac;--brown:#c0a080;--gray:#adb5bd;';
 
@@ -208,24 +208,16 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
   const ff = st?.frames?.files ?? {};
   const fd = st?.frames?.folders ?? {};
   const dim = st ? true : (ov.dim ?? (Object.keys(marks).length > 0 || ghosts.length > 0 || arcs.length > 0));
-  // a stack's base colours come from its base (step 0), so a later step can't recolour the map
-  const snap = buildSnapshot(map.repo, map.files.filter((f) => !st || frameAt(ff[f.path], 0, [0])[1]).map((f) => [f.path, f.size]));
-  const groups = folderGroups(snap);
-  const gOf = map.files.map((f) => {
-    const g = groups.ofPath(f.path);
-    return g < 0 ? 9 : g;
-  });
+  // base colours come from paths alone (lib/groups.ts), so every map of a repo agrees; each distinct colour
+  // is a custom property on the map (--k0, --k1...) to keep the page small
+  const palette = new Map<string, string>();
+  const kv = (css: string) => {
+    let k = palette.get(css);
+    if (k === undefined) palette.set(css, (k = `var(--k${palette.size})`));
+    return k;
+  };
+  const cOf = map.files.map((f) => kv(fileColour(f.path)));
   const index = new Map(map.files.map((f, i) => [f.path, i]));
-
-  // a folder takes its files' colour when they share one, else grey
-  const fgroup = new Map<string, number>();
-  map.files.forEach((f, i) => {
-    for (let d = f.path; d.includes('/'); ) {
-      d = d.slice(0, d.lastIndexOf('/'));
-      const g = fgroup.get(d);
-      fgroup.set(d, g === undefined ? gOf[i] : g === gOf[i] ? g : -1);
-    }
-  });
 
   const [x0, y0, x1, y1] = map.bounds;
   const pad = Math.max(x1 - x0, y1 - y0) * 0.03;
@@ -264,9 +256,8 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
   out.push('<g class="cells">');
   const folders = [...map.folders].sort((a, b) => a.depth - b.depth || cmp(a.path, b.path));
   for (const f of folders) {
-    const g = fgroup.get(f.path) ?? -1;
+    const col = kv(folderColour(f.path));
     const pct = Math.min(70, 16 + 9 * (f.depth - 1)) * (dim ? 0.6 : 1);
-    const col = g < 0 ? 'var(--neutral)' : `var(--g${g})`;
     const [[d], on] = frameAt<string>(fd[f.path], S, [ringD(f.outline)]);
     out.push(`<path class="cell${on ? '' : ' absent'}" data-d="${esc(f.path)}" fill-rule="evenodd" style="fill:color-mix(in srgb,${col} ${(st ? pct * 0.7 : pct).toFixed(0)}%,var(--panel))" d="${d}"/>`);
   }
@@ -287,7 +278,7 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
   out.push('<g class="dots">');
   map.files.forEach((f, i) => {
     if (marks[f.path]) return;
-    const col = `var(--g${gOf[i]})`;
+    const col = cOf[i];
     const fill = dim ? `color-mix(in srgb,${col} ${st ? 30 : 38}%,var(--panel))` : col;
     const [[x, y, r]] = geo(f);
     out.push(`<circle class="dot${stateOf(f)}" data-i="${i}" cx="${n2(x)}" cy="${n2(y)}" r="${n2(r)}" style="--c:${fill}"/>`);
@@ -384,6 +375,9 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
     }
   }
   out.push('</g></svg>');
+  // the base colours, as custom properties on the map (resolved against the map's own theme tokens)
+  const ks = [...palette].map(([css, k]) => `${k.slice(4, -1)}:${css}`).join(';');
+  out[0] = out[0].includes(' style="') ? out[0].replace(' style="', ` style="${ks};`) : out[0].replace(' role="img"', ` style="${ks}" role="img"`);
 
   return {
     svg: out.join('\n'),
@@ -757,8 +751,7 @@ export function renderHtml(map: CodeMap, overlay: Overlay = {}, opt: HtmlOptions
     for (const g of overlay.ghosts ?? []) tally(g, 'not on the map', 'var(--deleted)');
     legend = sortGroups([...count]).map(([k, [c, n]]) => item(c, `${k} ${n}`)).join('');
   } else {
-    const groups = folderGroups(buildSnapshot(map.repo, map.files.map((f) => [f.path, f.size])));
-    legend = groups.labels.map((l, i) => item(`var(--g${i === groups.labels.length - 1 && l === 'everything else' ? 9 : i})`, l)).join('');
+    legend = legendEntries(buildSnapshot(map.repo, map.files.map((f) => [f.path, f.size]))).map((e) => item(e.colour, e.label)).join('');
   }
 
   // the list of marked files, grouped

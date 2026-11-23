@@ -10,6 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mapAt, type CodeMap } from '../skills/bubbles/lib/layout.ts';
 import { changeMap } from '../skills/bubbles/lib/pr.ts';
+import { fileColour, folderColour, folderHue } from '../skills/bubbles/lib/groups.ts';
 import { applyRules, globMatcher, renderHtml, renderSvg } from '../skills/bubbles/lib/render.ts';
 import { stackMap, type StackMap } from '../skills/bubbles/lib/stack.ts';
 
@@ -297,4 +298,50 @@ test('the CLI draws a stack from branches, in the order given', () => {
   assert.match(readFileSync(join(out, 'r.html'), 'utf8'), /id="st-range"/);
   run('stack', repo, '--commits', 'main..s3', '--no-cache', '--quiet', '--out', join(out, 'c.json'));
   assert.equal(JSON.parse(readFileSync(join(out, 'c.json'), 'utf8')).overlay.stack.unit, 'commit');
+});
+
+/** The base colour of every folder cell and every unmarked file dot in a drawn map, as CSS. */
+function coloursOf(svg: string, map: CodeMap): Map<string, string> {
+  const vars = new Map<string, string>();
+  for (const m of svg.slice(0, svg.indexOf('>')).matchAll(/(--k\d+):([^;"]+)/g)) vars.set(m[1], m[2]);
+  const out = new Map<string, string>();
+  const k = (s: string) => vars.get(/var\((--k\d+)\)/.exec(s)![1])!;
+  for (const m of svg.matchAll(/<path class="cell[^"]*" data-d="([^"]+)"[^>]*style="([^"]+)"/g)) out.set(m[1] + '/', k(m[2]));
+  for (const m of svg.matchAll(/<circle class="dot[^"]*" data-i="(\d+)"[^>]*style="([^"]+)"/g)) out.set(map.files[+m[1]].path, k(m[2]));
+  return out;
+}
+
+test('base colours depend only on the path: the same folder has the same colour on every map', () => {
+  // the colour function: only the first two levels of the path count, the root is grey, and the rule is pinned
+  assert.equal(folderColour('src/core/deep/er'), folderColour('src/core'));
+  assert.equal(fileColour('src/core/deep/x.ts'), folderColour('src/core'));
+  assert.equal(fileColour('README.md'), 'var(--neutral)');
+  assert.notEqual(folderColour('src'), folderColour('src/core'));
+  assert.deepEqual(folderHue('crates'), folderHue('crates'));
+  assert.deepEqual([folderHue('crates'), folderHue('crates/core'), folderHue('tests')], [{ h: 203, l: 0 }, { h: 250, l: 1 }, { h: 227, l: 1 }]);
+
+  // drawn: two commits, a folder map, a PR and a stack (whose lib/x/ is new in the stack) all agree
+  const early = mapAt(repo, shas[10], { cacheDir: null });
+  const late = mapAt(repo, 'HEAD', { cacheDir: null });
+  const part = mapAt(repo, 'HEAD', { cacheDir: null, path: 'src' });
+  const pr = changeMap(repo, 'main', 's3', { cacheDir: null });
+  const st = stackMap(repo, 'main', ['s1', 's2', 's3'].map((ref) => ({ ref, label: ref })), { cacheDir: null });
+  const drawn = [
+    coloursOf(renderSvg(early), early),
+    coloursOf(renderSvg(late), late),
+    coloursOf(renderSvg(part), part),
+    coloursOf(renderSvg(pr.map, { dim: false }), pr.map),
+    coloursOf(renderSvg(st.map, st.overlay), st.map),
+  ];
+  const all = new Map<string, string>();
+  let shared = 0;
+  for (const d of drawn)
+    for (const [p, c] of d) {
+      const want = p.endsWith('/') ? folderColour(p.slice(0, -1)) : fileColour(p);
+      assert.equal(c, want, p);
+      if (all.has(p)) shared++;
+      all.set(p, c);
+    }
+  assert.ok(shared > 50, `${shared} folders and files drawn more than once`);
+  for (const p of ['src/', 'src/core/', 'src/ui/', 'test/', 'lib/', 'lib/x/']) assert.ok(all.has(p), `${p} drawn`);
 });
