@@ -59,8 +59,62 @@ export interface Overlay {
   arcs?: Arc[];
   legend?: ({ label: string } & Paint)[];
   list?: boolean; // list the marked files beside the map (default true)
+  stack?: Stack; // a sequence of changes with a slider across them (see Stack)
 }
 
+export type TouchKind = 'added' | 'modified' | 'deleted' | 'renamed';
+
+/** One step of a stack: a PR, a branch or a commit. */
+export interface StackStep {
+  label: string; // short: "#123", a branch, a short sha
+  title?: string;
+  link?: string;
+  commit?: string;
+  counts?: Partial<Record<TouchKind, number>>;
+}
+
+export interface StackFile {
+  touches: { step: number; kind: TouchKind; badge?: string; note?: string }[]; // step 1 = the first step
+}
+
+/**
+ * A stack of changes on one map, with a slider from step 0 (the base, nothing lit) to the last step. Files
+ * a step touches light up brightly at that step and stay dimly lit after; their folder's cell glows with
+ * them. Deleted files stay as dashed outlines. `frames` hold how the map differs at each step from the map
+ * the stack is drawn on: for a file, [step, x, y, r] means it is there from that step on, [step] that it is
+ * gone; for a folder, [step, svgPathD] or [step]. Without frames every file is where the map has it.
+ */
+export interface Stack {
+  steps: StackStep[];
+  files: Record<string, StackFile>;
+  frames?: { files?: Record<string, ([number] | [number, number, number, number])[]>; folders?: Record<string, ([number] | [number, string])[]> };
+  start?: number; // the step the page opens on (default: the last)
+  unit?: string; // what a step is called: "PR" (default "step")
+}
+
+/** Where a file or folder is at step s, from its frames: [geometry, present]. */
+function frameAt<T>(list: ([number] | [number, ...T[]])[] | undefined, s: number, dflt: T[]): [T[], boolean] {
+  let g = dflt;
+  let on = true;
+  for (const e of list ?? []) {
+    if (e[0] > s) break;
+    if (e.length > 1) {
+      g = e.slice(1) as T[];
+      on = true;
+    } else on = false;
+  }
+  return [g, on];
+}
+
+/** The last touch of a file at or before step s. */
+const touchAt = (f: StackFile | undefined, s: number) => {
+  let t: StackFile['touches'][number] | null = null;
+  for (const x of f?.touches ?? []) if (x.step <= s) t = x;
+  return t;
+};
+const haloR = (r: number) => r * 2.6 + 0.9;
+
+export const ringD = (rings: number[][]) => rings.map((r) => 'M' + r.map(n2).join(' ').replace(/^(\S+ \S+)/, '$1L') + 'Z').join('');
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const n2 = (v: number) => String(Math.round(v * 100) / 100);
 const isTone = (t: string | undefined): t is string => !!t && (TONES as readonly string[]).includes(t.toLowerCase());
@@ -85,21 +139,38 @@ const DARK =
   '--added:#69db7c;--modified:#ffa94d;--deleted:#f783ac;--renamed:#74c0fc;--hot:#ff6b6b;--warm:#ffd43b;--cool:#4dabf7;--muted-tone:#adb5bd;' +
   '--red:#ff6b6b;--orange:#ff922b;--yellow:#ffd43b;--green:#69db7c;--teal:#3bc9db;--blue:#4dabf7;--purple:#9775fa;--pink:#f783ac;--brown:#c0a080;--gray:#adb5bd;';
 
-/** Theme tokens: light on :root, dark under the OS setting and under an explicit data-theme. */
+const GLOW = '--glow:#ffc94a;--glow-core:#fff3c9;--ember:#a8782f;--ember-cell:#7a5a26;';
+
+/** Theme tokens: light on :root, dark under the OS setting and under an explicit data-theme. A stack is
+ *  drawn at night in both themes (the dark tokens on the map), so its lights read as lights. */
 export const THEME_CSS = `:root{${LIGHT}}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){${DARK}color-scheme:dark}}
-:root[data-theme="dark"]{${DARK}color-scheme:dark}`;
+:root[data-theme="dark"]{${DARK}color-scheme:dark}
+.night{${DARK}${GLOW}}`;
 
 const MAP_CSS = `.cm-map{display:block;background:var(--panel)}
 .cm-map .cell{stroke:none}
-.cm-map .dot{stroke:none}
+.cm-map .dot{stroke:none;fill:var(--c)}
 .cm-map .ring{fill:none;stroke-width:2px;vector-effect:non-scaling-stroke}
 .cm-map .ghost{stroke-width:1.5px;stroke-dasharray:3 2;vector-effect:non-scaling-stroke}
 .cm-map .arc{fill:none;vector-effect:non-scaling-stroke;stroke-linecap:round;opacity:.85}
 .cm-map text{font-family:Inter,system-ui,-apple-system,sans-serif;fill:var(--muted);paint-order:stroke;stroke:var(--panel);stroke-linejoin:round}
 .cm-map text.flab{fill:var(--ink)}
 .cm-map .hot{stroke:var(--ink);stroke-width:2px;vector-effect:non-scaling-stroke}
-.cm-map .cell.hot{stroke-width:1.5px}`;
+.cm-map .cell.hot{stroke-width:1.5px}
+.cm-map .absent{display:none}
+.cm-map .halo,.cm-map .clight{pointer-events:none;opacity:0;transition:opacity .6s}
+.cm-map .halo{fill:url(#cm-glow);transform-box:fill-box;transform-origin:center}
+.cm-map .halo.now{opacity:1}.cm-map .halo.past{opacity:.22;fill:url(#cm-ember)}
+.cm-map .clight{fill:var(--glow)}
+.cm-map .clight.now{opacity:.2}.cm-map .clight.past{opacity:.09;fill:var(--ember-cell)}
+.cm-map .dot.now,.cm-map .dot.past{transition:fill .6s}
+.cm-map .dot.now{fill:var(--glow-core)}.cm-map .dot.past{fill:color-mix(in srgb,var(--ember) 60%,var(--c))}
+.cm-map .dot.gone{fill:none;stroke:var(--ember);stroke-width:1.2px;stroke-dasharray:2 2;vector-effect:non-scaling-stroke}
+.cm-map .dot.gone.now{stroke:var(--glow-core)}
+.cm-map .halo.flare{animation:cm-flare 1.1s ease-out}
+@keyframes cm-flare{from{transform:scale(1.9)}to{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.cm-map .halo.flare{animation:none}.cm-map .halo,.cm-map .clight,.cm-map .dot.now,.cm-map .dot.past{transition:none}}`;
 
 // ---- the SVG ----
 
@@ -120,14 +191,27 @@ interface PageData {
   marks: Record<number, [string, string, string, string, string]>; // file index -> label, badge, note, group, colour
   ghosts: [string, number, number, number, string, string, string, string, string][]; // path, x, y, r, label, badge, note, group, colour
   folders: [string, number, number][]; // path, depth, files
+  stack?: {
+    steps: StackStep[];
+    unit: string;
+    start: number;
+    touch: Record<number, [number, string, string, string][]>; // file index -> [step, kind, badge, note]
+    ff: Record<number, unknown[]>; // file index -> frames
+    fd: Record<string, unknown[]>; // folder path -> frames
+  };
 }
 
 function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
   const marks = ov.files ?? {};
   const ghosts = ov.ghosts ?? [];
   const arcs = ov.arcs ?? [];
-  const dim = ov.dim ?? (Object.keys(marks).length > 0 || ghosts.length > 0 || arcs.length > 0);
-  const snap = buildSnapshot(map.repo, map.files.map((f) => [f.path, f.size]));
+  const st = ov.stack;
+  const S = st ? Math.max(0, Math.min(st.steps.length, st.start ?? st.steps.length)) : 0;
+  const ff = st?.frames?.files ?? {};
+  const fd = st?.frames?.folders ?? {};
+  const dim = st ? true : (ov.dim ?? (Object.keys(marks).length > 0 || ghosts.length > 0 || arcs.length > 0));
+  // a stack's base colours come from its base (step 0), so a later step can't recolour the map
+  const snap = buildSnapshot(map.repo, map.files.filter((f) => !st || frameAt(ff[f.path], 0, [0])[1]).map((f) => [f.path, f.size]));
   const groups = folderGroups(snap);
   const gOf = map.files.map((f) => {
     const g = groups.ofPath(f.path);
@@ -153,10 +237,31 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
   const out: string[] = [];
   out.push(
     standalone
-      ? `<svg xmlns="http://www.w3.org/2000/svg" class="cm-map" viewBox="${vb.map(n2).join(' ')}" width="${W}" height="${Math.round((W * vb[3]) / vb[2])}" role="img" aria-label="${esc(`Code map of ${map.repo}`)}">`
-      : `<svg class="cm-map" id="cm-map" viewBox="${vb.map(n2).join(' ')}" style="aspect-ratio:${n2(Math.max(0.6, Math.min(2.2, vb[2] / vb[3])))}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(`Code map of ${map.repo}`)}">`,
+      ? `<svg xmlns="http://www.w3.org/2000/svg" class="cm-map${st ? ' night' : ''}" viewBox="${vb.map(n2).join(' ')}" width="${W}" height="${Math.round((W * vb[3]) / vb[2])}" role="img" aria-label="${esc(`Code map of ${map.repo}`)}">`
+      : `<svg class="cm-map${st ? ' night' : ''}" id="cm-map" viewBox="${vb.map(n2).join(' ')}" style="aspect-ratio:${n2(Math.max(0.6, Math.min(2.2, vb[2] / vb[3])))}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(`Code map of ${map.repo}`)}">`,
   );
   if (standalone) out.push(`<style>${THEME_CSS}\n${MAP_CSS}</style><rect x="${n2(vb[0])}" y="${n2(vb[1])}" width="${n2(vb[2])}" height="${n2(vb[3])}" fill="var(--panel)"/>`);
+  if (st)
+    out.push(
+      '<defs>' +
+        [['cm-glow', 'var(--glow)', '.75'], ['cm-ember', 'var(--ember)', '.9']].map(([id, c, o]) => `<radialGradient id="${id}"><stop offset="0" style="stop-color:${c};stop-opacity:${o}"/><stop offset=".3" style="stop-color:${c};stop-opacity:${+o * 0.5}"/><stop offset="1" style="stop-color:${c};stop-opacity:0"/></radialGradient>`).join('') +
+        '</defs>',
+    );
+
+  // a stack's state at the step drawn: where each file is, and how it is lit
+  const geo = (f: CodeMap['files'][number]) => frameAt<number>(ff[f.path], S, [f.x, f.y, f.r]);
+  const lightOf = (path: string) => {
+    if (!st?.files[path]) return '';
+    const t = touchAt(st.files[path], S);
+    return t ? (t.step === S ? ' now' : ' past') : '';
+  };
+  const stateOf = (f: CodeMap['files'][number]) => {
+    if (!st) return '';
+    const on = geo(f)[1];
+    const t = touchAt(st.files[f.path], S);
+    return lightOf(f.path) + (on ? '' : t?.kind === 'deleted' ? ' gone' : ' absent');
+  };
+  const dirOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf('/')));
 
   // folder cells, shallow first so each subfolder sits on its parent
   out.push('<g class="cells">');
@@ -165,18 +270,42 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
     const g = fgroup.get(f.path) ?? -1;
     const pct = Math.min(70, 16 + 9 * (f.depth - 1)) * (dim ? 0.6 : 1);
     const col = g < 0 ? 'var(--neutral)' : `var(--g${g})`;
-    const d = f.outline.map((r) => 'M' + r.map(n2).join(' ').replace(/^(\S+ \S+)/, '$1L') + 'Z').join('');
-    out.push(`<path class="cell" data-d="${esc(f.path)}" fill-rule="evenodd" style="fill:color-mix(in srgb,${col} ${pct.toFixed(0)}%,var(--panel))" d="${d}"/>`);
+    const [[d], on] = frameAt<string>(fd[f.path], S, [ringD(f.outline)]);
+    out.push(`<path class="cell${on ? '' : ' absent'}" data-d="${esc(f.path)}" fill-rule="evenodd" style="fill:color-mix(in srgb,${col} ${(st ? pct * 0.7 : pct).toFixed(0)}%,var(--panel))" d="${d}"/>`);
   }
   out.push('</g>');
+
+  // a stack's cell lights: the folder of every touched file glows with it
+  if (st) {
+    out.push('<g class="clights">');
+    const lit = new Map<string, string>();
+    for (const p of Object.keys(st.files)) {
+      const l = lightOf(p).trim();
+      const d = dirOf(p);
+      lit.set(d, lit.get(d) === 'now' || l === 'now' ? 'now' : lit.get(d) || l);
+    }
+    for (const f of folders) {
+      if (!lit.has(f.path)) continue;
+      const [[d], on] = frameAt<string>(fd[f.path], S, [ringD(f.outline)]);
+      out.push(`<path class="clight ${lit.get(f.path)}${on ? '' : ' absent'}" data-c="${esc(f.path)}" fill-rule="evenodd" d="${d}"/>`);
+    }
+    out.push('</g><g class="halos">');
+    map.files.forEach((f, i) => {
+      if (!st.files[f.path]) return;
+      const [[x, y, r]] = geo(f);
+      out.push(`<circle class="halo${stateOf(f)}" data-h="${i}" cx="${n2(x)}" cy="${n2(y)}" r="${n2(haloR(r))}"/>`);
+    });
+    out.push('</g>');
+  }
 
   // dots
   out.push('<g class="dots">');
   map.files.forEach((f, i) => {
     if (marks[f.path]) return;
     const col = `var(--g${gOf[i]})`;
-    const fill = dim ? `color-mix(in srgb,${col} 38%,var(--panel))` : col;
-    out.push(`<circle class="dot" data-i="${i}" cx="${n2(f.x)}" cy="${n2(f.y)}" r="${n2(f.r)}" style="fill:${fill}"/>`);
+    const fill = dim ? `color-mix(in srgb,${col} ${st ? 30 : 38}%,var(--panel))` : col;
+    const [[x, y, r]] = geo(f);
+    out.push(`<circle class="dot${stateOf(f)}" data-i="${i}" cx="${n2(x)}" cy="${n2(y)}" r="${n2(r)}" style="--c:${fill}"/>`);
   });
   out.push('</g>');
 
@@ -247,7 +376,7 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
       out.push(`<text x="${n2(f.label[0])}" y="${n2(f.label[1] + size * 1.1)}" font-size="${n2(size)}" stroke-width="${n2(size * 0.25)}" text-anchor="middle" font-weight="600">${esc(name)}</text>`);
     } else
       out.push(
-        `<text data-k="d" data-x="${n2(f.label[0])}" data-y="${n2(f.label[1])}" data-w="${n2(f.bbox[2] - f.bbox[0])}" data-h="${n2(f.bbox[3] - f.bbox[1])}" data-depth="${f.depth}" text-anchor="middle" font-weight="600" visibility="hidden">${esc(name)}</text>`,
+        `<text data-k="d"${st && fd[f.path] ? ` data-dp="${esc(f.path)}"${frameAt(fd[f.path], S, [''])[1] ? '' : ' class="off"'}` : ''} data-x="${n2(f.label[0])}" data-y="${n2(f.label[1])}" data-w="${n2(f.bbox[2] - f.bbox[0])}" data-h="${n2(f.bbox[3] - f.bbox[1])}" data-depth="${f.depth}" text-anchor="middle" font-weight="600" visibility="hidden">${esc(name)}</text>`,
       );
   }
   if (!standalone) {
@@ -257,6 +386,13 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
       const f = map.files[index.get(p)!];
       out.push(`<text class="flab" data-k="f" data-x="${n2(f.x)}" data-y="${n2(f.y)}" data-r="${n2(f.r)}" visibility="hidden">${esc(m.label)}</text>`);
     }
+    if (st)
+      map.files.forEach((f, i) => {
+        if (!st.files[f.path] || marks[f.path]) return;
+        const [[x, y, r]] = geo(f);
+        const state = stateOf(f);
+        out.push(`<text class="flab${state.includes('now') && !state.includes('absent') ? '' : ' off'}" data-k="f" data-fi="${i}" data-x="${n2(x)}" data-y="${n2(y)}" data-r="${n2(r)}" visibility="hidden">${esc(f.path.slice(f.path.lastIndexOf('/') + 1))}</text>`);
+      });
     for (const g of ghosts) {
       if (!g.label) continue;
       out.push(`<text class="flab" data-k="f" data-x="${n2(g.x)}" data-y="${n2(g.y)}" data-r="${n2(g.r)}" visibility="hidden">${esc(g.label)}</text>`);
@@ -272,6 +408,22 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
       marks: markData,
       ghosts: ghosts.map((g) => [g.path, g.x, g.y, g.r, g.label ?? '', g.badge ?? '', g.note ?? '', g.group ?? g.tone ?? '', paint(g, 'var(--deleted)')]),
       folders: map.folders.map((f) => [f.path, f.depth, f.files]),
+      ...(st
+        ? {
+            stack: {
+              steps: st.steps,
+              unit: st.unit ?? 'step',
+              start: S,
+              touch: Object.fromEntries(
+                Object.entries(st.files)
+                  .filter(([p]) => index.has(p))
+                  .map(([p, t]) => [index.get(p)!, [...t.touches].sort((a, b) => a.step - b.step).map((x) => [x.step, x.kind, x.badge ?? '', x.note ?? ''])]),
+              ),
+              ff: Object.fromEntries(Object.entries(ff).filter(([p]) => index.has(p)).map(([p, l]) => [index.get(p)!, l])),
+              fd,
+            },
+          }
+        : {}),
     },
   };
 }
@@ -390,7 +542,7 @@ function place() {
   const s = scale(), boxes = [];
   for (const t of labels) {
     let show = false;
-    if (showLabels) {
+    if (showLabels && !t.classList.contains('off')) {
       const k = t.dataset.k, x = +t.dataset.x, y = +t.dataset.y;
       const px = k === 'd' ? Math.max(10, 15 - +t.dataset.depth) : 11.5;
       const tw = t.textContent.length * px * 0.58;
@@ -445,7 +597,7 @@ function hideTip() { tip.hidden = true; setHot(null); }
 function describe(el) {
   if (el.dataset.i !== undefined) {
     const i = +el.dataset.i, f = D.files[i], m = D.marks[i];
-    return [f[0] + ' · ' + size(f[1]) + (m && m[1] ? ' · ' + m[1] : ''), m && m[2]].filter(Boolean).join('\n');
+    return [f[0] + ' · ' + size(f[1]) + (m && m[1] ? ' · ' + m[1] : ''), m && m[2], window.CM_EXTRA && window.CM_EXTRA(i)].filter(Boolean).join('\n');
   }
   if (el.dataset.g !== undefined) { const g = D.ghosts[+el.dataset.g]; return [g[0] + (g[5] ? ' · ' + g[5] : ''), g[6]].filter(Boolean).join('\n'); }
   if (el.dataset.d !== undefined) { const f = D.folders.find((x) => x[0] === el.dataset.d); return f[0] + '/ · ' + f[2] + ' file' + (f[2] === 1 ? '' : 's'); }
@@ -478,6 +630,117 @@ for (const b of document.querySelectorAll('aside button[data-i],aside button[dat
   });
 }
 fit();
+window.CM_API = { centreOn, setHot, place };
+})();`;
+
+const STACK_CSS = `.plate.night{background:var(--panel)}
+.stackbar{display:grid;gap:6px;background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:10px 12px}
+.stackbar .row{display:flex;align-items:center;gap:8px}
+.stackbar button{font:500 13px Inter,system-ui,sans-serif;color:var(--ink);background:var(--bg);border:1px solid var(--rule);border-radius:999px;min-width:34px;height:30px;padding:0 10px;cursor:pointer;flex:none}
+.stackbar button:hover{border-color:var(--muted)}
+.stackbar #st-play{min-width:64px}
+.stackbar input[type=range]{flex:1;min-width:0;accent-color:#e0a21b;height:30px;margin:0}
+.st-now{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;min-height:1.5em}
+.st-now b{font-weight:600}
+.st-now a{color:var(--accent)}
+.st-now .c{font:12px "JetBrains Mono",ui-monospace,Menlo,monospace;color:var(--muted)}
+aside .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+aside .t b{font-weight:600;margin-right:6px}
+aside li.cur button{background:color-mix(in srgb,#e0a21b 16%,transparent)}
+aside li.later{opacity:.55}
+aside i.lt-now{background:#f5b82e;box-shadow:0 0 6px 1px #f5b82e}
+aside i.lt-past{background:#a8782f}
+aside i.lt-off{background:var(--rule)}
+aside .k{font:11px "JetBrains Mono",ui-monospace,Menlo,monospace;color:var(--muted);margin:0 14px 6px}`;
+
+const STACK_JS = String.raw`(() => {
+const D = window.CM_DATA, K = D.stack, api = window.CM_API, svg = document.getElementById('cm-map');
+const n = K.steps.length, U = K.unit;
+const q = (s) => [...svg.querySelectorAll(s)];
+const byAttr = (sel, a) => { const m = {}; for (const el of q(sel)) (m[el.getAttribute(a)] ||= []).push(el); return m; };
+const dot = byAttr('.dots .dot[data-i]', 'data-i'), halo = byAttr('.halo', 'data-h'), flab = byAttr('text[data-fi]', 'data-fi');
+const cell = byAttr('.cells .cell', 'data-d'), clight = byAttr('.clight', 'data-c'), dlab = byAttr('text[data-dp]', 'data-dp');
+const keys = new Set([...Object.keys(K.ff), ...Object.keys(K.touch)]);
+const home = {}; for (const i of keys) { const f = D.files[i]; home[i] = [f[2], f[3], f[4]]; }
+const homeD = {}; for (const p in K.fd) homeD[p] = cell[p] ? cell[p][0].getAttribute('d') : '';
+function at(list, s, d) { let g = d, on = true; for (const e of list || []) { if (e[0] > s) break; if (e.length > 1) { g = e.slice(1); on = true; } else on = false; } return [g, on]; }
+function touchAt(i, s) { let t = null; for (const x of K.touch[i] || []) if (x[0] <= s) t = x; return t; }
+const dirOf = (p) => p.slice(0, Math.max(0, p.lastIndexOf('/')));
+const inDir = {}; for (const i in K.touch) (inDir[dirOf(D.files[i][0])] ||= []).push(i);
+const tog = (els, c, on) => { for (const el of els || []) el.classList.toggle(c, !!on); };
+const r = document.getElementById('st-range'), now = document.getElementById('st-now'), steps = document.getElementById('st-steps'), list = document.getElementById('st-files'), head = document.getElementById('st-files-h');
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const counts = (c) => ['added', 'modified', 'deleted', 'renamed'].filter((k) => c && c[k]).map((k) => c[k] + ' ' + k).join(', ') || 'no file changes';
+const total = (c) => Object.values(c || {}).reduce((a, b) => a + b, 0);
+const haloR = (x) => x * 2.6 + 0.9;
+let cur = -1;
+function setStep(s, flare) {
+  s = Math.max(0, Math.min(n, s));
+  if (s === cur) return;
+  cur = s;
+  for (const i of keys) {
+    const [g, on] = at(K.ff[i], s, home[i]), t = touchAt(i, s);
+    const lit = t ? (t[0] === s ? 'now' : 'past') : '', gone = !on && t && t[1] === 'deleted';
+    const f = D.files[i]; f[2] = g[0]; f[3] = g[1]; f[4] = g[2];
+    for (const el of dot[i] || []) { el.setAttribute('cx', g[0]); el.setAttribute('cy', g[1]); el.setAttribute('r', g[2]); }
+    for (const el of halo[i] || []) {
+      el.setAttribute('cx', g[0]); el.setAttribute('cy', g[1]); el.setAttribute('r', haloR(g[2]));
+      if (flare && lit === 'now' && !el.classList.contains('now')) { el.classList.remove('flare'); void el.getBBox(); el.classList.add('flare'); }
+    }
+    for (const el of flab[i] || []) { el.dataset.x = g[0]; el.dataset.y = g[1]; el.dataset.r = g[2]; el.classList.toggle('off', lit !== 'now' || !(on || gone)); }
+    for (const els of [dot[i], halo[i]]) { tog(els, 'now', lit === 'now'); tog(els, 'past', lit === 'past'); tog(els, 'gone', gone); tog(els, 'absent', !on && !gone); }
+  }
+  for (const p in K.fd) {
+    const [g, on] = at(K.fd[p], s, [homeD[p]]);
+    for (const el of [...(cell[p] || []), ...(clight[p] || [])]) { el.setAttribute('d', g[0]); el.classList.toggle('absent', !on); }
+    tog(dlab[p], 'off', !on);
+  }
+  for (const d in clight) {
+    let l = '';
+    for (const i of inDir[d] || []) { const t = touchAt(i, s); if (t) l = t[0] === s ? 'now' : l || 'past'; if (l === 'now') break; }
+    tog(clight[d], 'now', l === 'now'); tog(clight[d], 'past', l === 'past');
+  }
+  api.place();
+  ui(s);
+}
+function ui(s) {
+  r.value = s;
+  const st = K.steps[s - 1];
+  r.setAttribute('aria-valuetext', s ? U + ' ' + s + ' of ' + n + ': ' + st.label : 'the base');
+  now.innerHTML = s
+    ? '<b>' + U + ' ' + s + ' of ' + n + '</b>' + (st.link ? '<a href="' + esc(st.link) + '" target="_blank" rel="noopener">' + esc(st.label) + '</a>' : '<span>' + esc(st.label) + '</span>') + '<span>' + esc(st.title || '') + '</span><span class="c">' + esc(counts(st.counts)) + '</span>'
+    : '<b>Base</b><span>before the stack: nothing lit yet</span>';
+  for (const li of steps.children) { const k = +li.dataset.s; li.classList.toggle('cur', k === s); li.classList.toggle('later', k > s); const i = li.querySelector('i'); i.className = k === s && k ? 'lt-now' : k < s && k ? 'lt-past' : 'lt-off'; }
+  const rows = [];
+  for (const i in K.touch) for (const x of K.touch[i]) if (x[0] === s && s) rows.push([D.files[i][0], i, x]);
+  rows.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  head.textContent = s ? 'Lit by ' + st.label + ' · ' + rows.length : 'Lit · 0';
+  list.innerHTML = rows.map(([p, i, x]) => { const c = p.lastIndexOf('/'); return '<li><button type="button" data-i="' + i + '"><i class="lt-now"></i><span class="p"><span><em>' + esc(p.slice(0, c + 1)) + '</em><b>' + esc(p.slice(c + 1)) + '</b></span></span><span class="b">' + esc(x[1] + (x[2] ? ' ' + x[2] : '')) + '</span></button></li>'; }).join('');
+}
+steps.innerHTML = [-1, ...K.steps.keys()].map((k) => { const st = K.steps[k]; return '<li data-s="' + (k + 1) + '"><button type="button"><i></i><span class="t">' + (st ? '<b>' + esc(st.label) + '</b>' + esc(st.title || '') : '<b>Base</b>before the stack') + '</span><span class="b">' + (st ? total(st.counts) : '') + '</span></button></li>'; }).join('');
+steps.addEventListener('click', (e) => { const li = e.target.closest('li[data-s]'); if (li) { stop(); setStep(+li.dataset.s, true); } });
+list.addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (!b) return; const f = D.files[+b.dataset.i]; api.centreOn(f[2], f[3], Math.max(24, D.bounds[2] / 6)); api.setHot((dot[b.dataset.i] || [])[0]); });
+list.addEventListener('mouseover', (e) => { const b = e.target.closest('button[data-i]'); api.setHot(b ? (dot[b.dataset.i] || [])[0] : null); });
+list.addEventListener('mouseleave', () => api.setHot(null));
+r.addEventListener('input', () => { stop(); setStep(+r.value, true); });
+document.getElementById('st-prev').addEventListener('click', () => { stop(); setStep(cur - 1, true); });
+document.getElementById('st-next').addEventListener('click', () => { stop(); setStep(cur + 1, true); });
+const pb = document.getElementById('st-play');
+let timer = null;
+function stop() { if (timer) clearInterval(timer); timer = null; pb.textContent = 'Play'; pb.setAttribute('aria-pressed', 'false'); }
+pb.addEventListener('click', () => {
+  if (timer) return stop();
+  if (cur >= n) setStep(0, false);
+  pb.textContent = 'Pause'; pb.setAttribute('aria-pressed', 'true');
+  timer = setInterval(() => { setStep(cur + 1, true); if (cur >= n) stop(); }, 1600);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowRight' || e.key === ']') { stop(); setStep(cur + 1, true); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft' || e.key === '[') { stop(); setStep(cur - 1, true); e.preventDefault(); }
+});
+window.CM_EXTRA = (i) => (K.touch[i] || []).map((x) => (x[0] === cur ? '● ' : x[0] < cur ? '○ ' : '  ') + K.steps[x[0] - 1].label + ': ' + x[1] + (x[2] ? ' ' + x[2] : '') + (x[3] ? ' (' + x[3] + ')' : '')).join('\n');
+setStep(K.start, false);
 })();`;
 
 const ORDER = ['added', 'modified', 'renamed', 'deleted'];
@@ -499,8 +762,12 @@ export function renderHtml(map: CodeMap, overlay: Overlay = {}, opt: HtmlOptions
   // legend: the overlay's own, else the tones it uses (with counts), else the base map's folder colours
   let legend = '';
   const item = (c: string, l: string) => `<span><i style="background:${c}"></i>${esc(l)}</span>`;
+  const st = overlay.stack;
   if (overlay.legend) legend = overlay.legend.map((l) => item(paint(l), l.label)).join('');
-  else if (Object.keys(marks).length || overlay.ghosts?.length) {
+  else if (st) {
+    const u = st.unit ?? 'step';
+    legend = [item('#f5b82e;box-shadow:0 0 6px 1px #f5b82e', `touched by this ${u}`), item('#a8782f', `touched by an earlier ${u}`), `<span><i style="border:1.5px dashed #a8782f"></i>deleted</span>`].join('');
+  } else if (Object.keys(marks).length || overlay.ghosts?.length) {
     const count = new Map<string, [string, number]>();
     const tally = (m: Paint & { group?: string }, fallbackGroup: string, fallbackColour: string) => {
       const k = m.group ?? m.tone ?? fallbackGroup;
@@ -533,11 +800,16 @@ export function renderHtml(map: CodeMap, overlay: Overlay = {}, opt: HtmlOptions
     addRow(m.group ?? m.tone ?? 'marked', `data-i="${i}"`, paint(m), p, m.badge ?? '');
   }
   (overlay.ghosts ?? []).forEach((g, k) => addRow(g.group ?? g.tone ?? 'not on the map', `data-g="${k}"`, paint(g, 'var(--deleted)'), g.path, g.badge ?? ''));
-  const showList = (overlay.list ?? true) && rows.size > 0;
-  if (showList) list = `<aside aria-label="Marked files">${sortGroups([...rows]).map(([g, r]) => `<h2>${esc(g)} · ${r.length}</h2><ul>${r.join('')}</ul>`).join('')}</aside>`;
+  const showList = !!st || ((overlay.list ?? true) && rows.size > 0);
+  if (st) list = `<aside aria-label="The stack"><h2>The stack · ${st.steps.length}</h2><ol id="st-steps" style="list-style:none;margin:0;padding:0"></ol><h2 id="st-files-h">Lit</h2><ul id="st-files"></ul></aside>`;
+  else if (showList) list = `<aside aria-label="Marked files">${sortGroups([...rows]).map(([g, r]) => `<h2>${esc(g)} · ${r.length}</h2><ul>${r.join('')}</ul>`).join('')}</aside>`;
+  const u = st?.unit ?? 'step';
+  const stackbar = st
+    ? `<div class="stackbar"><div class="row"><button type="button" id="st-prev" aria-label="Previous ${esc(u)}">‹</button><button type="button" id="st-play" aria-pressed="false">Play</button><button type="button" id="st-next" aria-label="Next ${esc(u)}">›</button><input type="range" id="st-range" min="0" max="${st.steps.length}" step="1" value="${st.start ?? st.steps.length}" aria-label="${esc(u)} in the stack"></div><div class="st-now" id="st-now" aria-live="polite"></div></div>`
+    : '';
 
   const eyebrow = `${map.repo}${map.root ? "/" + map.root + "/" : ""} · ${map.commit.slice(0, 7)} · ${map.date} · ${map.files.length.toLocaleString('en')} files`;
-  const sub = overlay.subtitle ?? (Object.keys(marks).length ? '' : map.subject);
+  const sub = overlay.subtitle ?? (Object.keys(marks).length || st ? '' : map.subject);
   const page = `<!doctype html>
 <html lang="en">
 <head>
@@ -550,7 +822,7 @@ export function renderHtml(map: CodeMap, overlay: Overlay = {}, opt: HtmlOptions
 <style>
 ${THEME_CSS}
 ${PAGE_CSS}
-${MAP_CSS}
+${MAP_CSS}${st ? '\n' + STACK_CSS : ''}
 </style>
 </head>
 <body>
@@ -562,8 +834,9 @@ ${sub ? `<p>${esc(sub)}</p>` : ''}
 ${overlay.link ? `<p><a href="${esc(overlay.link)}" target="_blank" rel="noopener">${esc(overlay.link)}</a></p>` : ''}
 </header>
 <div class="bar"><div class="legend">${legend}</div><div class="tools"><button type="button" id="names" aria-pressed="true">Names</button><button type="button" id="fit">Fit</button></div></div>
+${stackbar}
 <div class="body${showList ? ' has-list' : ''}">
-<div class="plate">
+<div class="plate${st ? ' night' : ''}">
 ${svg}
 <div class="hint">Drag to pan · scroll or pinch to zoom · hover for names</div>
 </div>
@@ -573,7 +846,7 @@ ${list}
 </div>
 <div id="tip" hidden></div>
 <script>window.CM_DATA = ${JSON.stringify(data).replace(/</g, '\\u003c')};</script>
-<script>${PAGE_JS}</script>
+<script>${PAGE_JS}</script>${st ? `\n<script>${STACK_JS}</script>` : ''}
 </body>
 </html>
 `;

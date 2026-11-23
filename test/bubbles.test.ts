@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { mapAt, type CodeMap } from '../skills/bubbles/lib/layout.ts';
 import { changeMap } from '../skills/bubbles/lib/pr.ts';
 import { applyRules, globMatcher, renderHtml, renderSvg } from '../skills/bubbles/lib/render.ts';
+import { stackMap, type StackMap } from '../skills/bubbles/lib/stack.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'skills', 'bubbles', 'bubbles.ts');
@@ -202,4 +203,98 @@ test('colour rules: globs by name, by path and by folder; explicit marks win', (
   assert.equal(o.files!['guide/d4.md'].group, 'docs');
   assert.equal(o.files!['src/core/f1.ts'].group, 'src/core/');
   assert.match(renderSvg(m, { rules: [{ match: '*.md', color: 'green' }] }), /var\(--green\)/);
+});
+
+/** Where every file is at step s of a stack (absent files left out). */
+function stackAt(r: StackMap, s: number): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  for (const f of r.map.files) {
+    let g = [f.x, f.y, f.r];
+    let on = true;
+    for (const e of r.overlay.stack!.frames!.files![f.path] ?? []) {
+      if (e[0] > s) break;
+      if (e.length > 1) {
+        g = e.slice(1) as number[];
+        on = true;
+      } else on = false;
+    }
+    if (on) out.set(f.path, g);
+  }
+  return out;
+}
+
+test('a stack: each step lights what it touches, nothing moves, and no step looks ahead', () => {
+  git(repo, 'checkout', '-q', '-b', 's1', 'main');
+  put(repo, 'src/ui/s1.ts', 900);
+  put(repo, 'src/core/f2.ts', 900);
+  commit(repo, 's1');
+  git(repo, 'checkout', '-q', '-b', 's2');
+  put(repo, 'src/net/a.ts', 1500);
+  put(repo, 'src/net/b.ts', 700);
+  rmSync(join(repo, 'guide', 'd4.md'));
+  commit(repo, 's2');
+  git(repo, 'checkout', '-q', '-b', 's3');
+  git(repo, 'mv', 'src/ui/s1.ts', 'src/net/s1.ts');
+  put(repo, 'src/net/a.ts', 1600);
+  put(repo, 'lib/x/y.ts', 2000);
+  commit(repo, 's3');
+  git(repo, 'checkout', '-q', 'main');
+  const items = ['s1', 's2', 's3'].map((ref) => ({ ref, label: ref }));
+  const r = stackMap(repo, 'main', items, { cacheDir: null });
+  const st = r.overlay.stack!;
+  assert.deepEqual(st.steps.map((s) => s.counts), [{ added: 1, modified: 1 }, { added: 2, deleted: 1 }, { renamed: 1, modified: 1, added: 1 }]);
+  assert.deepEqual(st.files['src/net/a.ts'].touches.map((t) => [t.step, t.kind]), [[2, 'added'], [3, 'modified']]);
+  assert.equal(st.files['guide/d4.md'].touches[0].kind, 'deleted');
+  assert.equal(st.files['src/net/s1.ts'].touches[0].note, 'renamed from src/ui/s1.ts');
+
+  // step 0 is the base map; a file keeps its spot from the step it appears; dots never overlap
+  const base = mapAt(repo, r.base, { cacheDir: null });
+  const g0 = stackAt(r, 0);
+  assert.equal(g0.size, base.files.length);
+  for (const f of base.files) assert.deepEqual(g0.get(f.path)!.slice(0, 2), [f.x, f.y], f.path);
+  const seen = new Map<string, number[]>();
+  for (let s = 0; s <= 3; s++) {
+    const g = stackAt(r, s);
+    for (const [p, v] of g) {
+      if (seen.has(p)) assert.deepEqual(v.slice(0, 2), seen.get(p)!.slice(0, 2), `${p} moved at step ${s}`);
+      seen.set(p, v);
+    }
+    for (const p of seen.keys()) if (!g.has(p)) seen.delete(p);
+    const list = [...g];
+    for (let i = 0; i < list.length; i++)
+      for (let j = i + 1; j < list.length; j++) {
+        const [pa, a] = list[i];
+        const [pb, b] = list[j];
+        assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) >= a[2] + b[2] - 0.05, `${pa} overlaps ${pb} at step ${s}`);
+      }
+  }
+  assert.ok(!stackAt(r, 2).has('guide/d4.md') && stackAt(r, 1).has('guide/d4.md'));
+  assert.ok(!stackAt(r, 1).has('src/net/a.ts') && stackAt(r, 2).has('src/net/a.ts'));
+
+  // the first two steps of the stack are the same without the third
+  const r2 = stackMap(repo, 'main', items.slice(0, 2), { cacheDir: null });
+  for (let s = 0; s <= 2; s++) assert.deepEqual([...stackAt(r2, s)].filter(([p]) => p !== 'lib/x/y.ts'), [...stackAt(r, s)], `step ${s}`);
+
+  const html = renderHtml(r.map, r.overlay);
+  const svg = renderSvg(r.map, r.overlay);
+  const page = html.slice(0, html.indexOf('<script>'));
+  for (const out of [page, svg]) assert.ok(!/NaN|undefined/.test(out), 'no NaN or undefined in the output');
+  assert.match(html, /id="st-range" min="0" max="3"/);
+  assert.match(svg, /class="cm-map night"/);
+  assert.match(svg, /class="halo now"/);
+});
+
+test('the CLI draws a stack from branches, in the order given', () => {
+  const out = mkdtempSync(join(tmpdir(), 'codemap-out-'));
+  const run = (...a: string[]) => execFileSync(process.execPath, [CLI, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  run('stack', repo, '--head', 's1=First', '--head', 's2', '--head', 's3', '--base', 'main', '--no-cache', '--quiet', '--out', join(out, 's.json'), '--artifact', '--out', join(out, 's.html'));
+  const j = JSON.parse(readFileSync(join(out, 's.json'), 'utf8'));
+  assert.deepEqual(j.overlay.stack.steps.map((s: { label: string; title: string }) => [s.label, s.title]), [['s1', 'First'], ['s2', 's2'], ['s3', 's3']]);
+  assert.equal(j.heads.length, 3);
+  const html = readFileSync(join(out, 's.html'), 'utf8');
+  assert.match(html, /^<title>[^<]+ stack of 3<\/title>/);
+  run('render', join(out, 's.json'), '--out', join(out, 'r.html'));
+  assert.match(readFileSync(join(out, 'r.html'), 'utf8'), /id="st-range"/);
+  run('stack', repo, '--commits', 'main..s3', '--no-cache', '--quiet', '--out', join(out, 'c.json'));
+  assert.equal(JSON.parse(readFileSync(join(out, 'c.json'), 'utf8')).overlay.stack.unit, 'commit');
 });

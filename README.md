@@ -11,6 +11,7 @@ It is a Claude Code plugin with one skill (`skills/bubbles/SKILL.md`) and a comm
 dependencies, nothing to install.
 
 Demo: ripgrep PR #2483 on its map, https://claude.ai/artifact/CWN6z14TETzgAn7XmXonJ4
+Stack demo: ten ripgrep commits as a stack, with a slider, https://claude.ai/artifact/Wz7ZdrKs1B3B8ytbWumqDN
 
 ## Install
 
@@ -39,6 +40,7 @@ to `~/.cache/bubbles` and runs from there.
 ```sh
 node skills/bubbles/bubbles.ts map    [repo] [--ref REF] [--overlay FILE] [--out FILE]...
 node skills/bubbles/bubbles.ts pr     [repo] (--pr N | --head REF) [--base REF] [--title T] [--link URL] [--out FILE]...
+node skills/bubbles/bubbles.ts stack  [repo] (--pr N[=TITLE]... | --head REF[=TITLE]... | --commits A..B) [--base REF] [--out FILE]...
 node skills/bubbles/bubbles.ts render MAP.json [--overlay FILE] [--out FILE]...
 ```
 
@@ -60,6 +62,8 @@ All paths below are in `skills/bubbles/`.
   the map file: file positions and radii, folder outlines (`lib/contour.ts`).
 - `lib/render.ts`: SVG and HTML, with overlays (per-file colour, label, badge and note; ghosts; arcs).
 - `lib/pr.ts`: the pull request layer.
+- `lib/stack.ts`: the stack layer: several PRs (or branches, or commits) in order, with a slider. Each one
+  lights up the files it touches; they stay dimly lit after.
 
 The layout core knows nothing about drawing, and the renderer only needs file positions and folder outlines,
 so another stable layout (rectangles, say) could feed the same renderer and overlays.

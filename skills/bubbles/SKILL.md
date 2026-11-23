@@ -1,6 +1,6 @@
 ---
 name: bubbles
-description: Draw a stable spatial map of a git repository (files as dots, folders as nested cells) and overlay data on it, such as the files a pull request or branch changes. Use when asked to map, visualise or picture a codebase, or to show where a PR, branch or set of files sits in it.
+description: Draw a stable spatial map of a git repository (files as dots, folders as nested cells) and overlay data on it, such as the files a pull request or branch changes, or a stack of PRs with a slider. Use when asked to map, visualise or picture a codebase, or to show where a PR, a stack of PRs, a branch or set of files sits in it.
 ---
 
 # Bubbles: a code map
@@ -28,6 +28,9 @@ Below, `bubbles` means `node <that path>`. Check `node --version` first; older N
 bubbles map    [repo] [--ref REF] [--title T] [--overlay FILE] [--out FILE]...  # the map at a commit (default HEAD)
 bubbles pr     [repo] --pr N [--base REF] [--title T] [--link URL] [--out FILE]...   # a GitHub PR
 bubbles pr     [repo] --head REF [--base REF] [--out FILE]...           # any branch or commit
+bubbles stack  [repo] --pr N[=TITLE] --pr N[=TITLE]... [--base REF] [--title T] [--out FILE]...  # a stack of PRs
+bubbles stack  [repo] --head REF[=TITLE]... [--base REF] [--out FILE]...  # a stack of branches or commits
+bubbles stack  [repo] --commits A..B [--out FILE]...                      # each commit in A..B is a step
 bubbles render MAP.json [--overlay FILE] [--out FILE]...                # draw a saved map with an overlay
 ```
 
@@ -49,6 +52,20 @@ Requests come in plain words, like "/bubbles src and make storybook files green"
   versions; any other CSS colour (`#7048e8`) is used as is. Everything not coloured fades into the background.
 - A PR ("show PR 123 in src/api") combines: `pr --pr 123 --path src/api`. PR marks win over colour rules.
 
+- A stack ("show what my stack of PRs 101-110 does", "step through these branches") is `stack`, with
+  `--pr` or `--head` once per step, bottom of the stack first. The page has a slider across the stack: at
+  each step the files that step touches light up brightly, files touched by earlier steps stay dimly lit,
+  and the folder cells around them glow with them; added files appear and deleted ones become dashed
+  outlines. It opens on the last step; Play steps through from the base. Add `=TITLE` to name a step
+  (`--pr '101=Add the parser'`); without it a step is named after its head commit's subject, so pass PR
+  titles when you know them. `--pr` fetches each PR as `pr` does and links it on GitHub. The base defaults
+  to origin's default branch; the stack starts from its merge base with the first step. Each step's
+  changes are the diff from the step before, so the steps should build on each other (a warning says
+  when one does not). `--commits A..B` makes each first-parent commit in the range a step; use it for a
+  local stack of commits, or to show a run of history. At most 60 steps.
+- In a stack nothing moves while you slide: the base is the base map, and every file keeps the spot it
+  had when it first appeared (a file a step adds goes where the layout puts it as of that step, or the
+  nearest free spot to it). A step's frame depends only on the steps up to it.
 - `--out` picks the format from the extension: `.html` is an interactive page (pan, zoom, hover, a list of
   marked files; one self-contained file with the map and layers baked in), `.svg` is a static picture,
   `.json` is the map data (plus the overlay for `pr`). Repeat `--out` to write several. Always pass `--out`
@@ -88,7 +105,14 @@ An overlay is JSON. Everything is optional; paths are repo-relative, as in the m
   "rules": [{ "match": "*.stories.*", "color": "green", "label": "Stories" }],
   "ghosts": [{ "path": "old/gone.rs", "x": 3.2, "y": -1.5, "r": 0.6, "tone": "deleted" }],
   "arcs": [{ "from": "src/main.rs", "to": "src/lib.rs", "tone": "cool", "width": 2, "note": "calls" }],
-  "legend": [{ "tone": "hot", "label": "most commits" }]
+  "legend": [{ "tone": "hot", "label": "most commits" }],
+  "stack": {
+    "unit": "PR",
+    "steps": [{ "label": "#101", "title": "Add the parser", "link": "https://...", "counts": { "added": 2 } }],
+    "files": { "src/parse.rs": { "touches": [{ "step": 1, "kind": "added", "badge": "+120 −0" }] } },
+    "frames": { "files": { "src/parse.rs": [[0], [1, 4.2, -3.1, 0.8]] }, "folders": { "src": [[1, "M0 0L..."]] } },
+    "start": 1
+  }
 }
 ```
 
@@ -105,6 +129,13 @@ An overlay is JSON. Everything is optional; paths are repo-relative, as in the m
 - `dim` fades the base map (default: on whenever the overlay marks anything).
 - Ghosts are for files that are not on the map; they need a position, so they mostly come from `pr`.
 - Arc ends are file paths (on the map or a ghost) or `[x, y]` points.
+- `stack` turns the page into a slider over `steps` (step 0 is the base, step k is `steps[k-1]`). A file in
+  `files` lights up at each step that touches it (`kind`: added, modified, deleted, renamed) and stays
+  dimly lit after; `start` is the step the page opens on (default: the last). `frames` say how the map
+  differs at each step from the map it is drawn on: for a file `[step, x, y, r]` (there from that step
+  on) or `[step]` (gone from that step on); for a folder `[step, svgPathD]` or `[step]`. Without frames,
+  every file is where the map has it at every step. `bubbles stack --out stack.json` writes the map and a
+  full stack overlay to start from. The map is drawn at night (dark, in either theme) so the lights read.
 
 To build your own layer: run `bubbles map --out map.json`, read the `files` array for paths and positions,
 write an overlay, then `bubbles render map.json --overlay overlay.json --out page.html`. `pr` and `map`
@@ -132,7 +163,8 @@ By default, publish the map as an Artifact:
 2. Publish that file with the Artifact tool: icon `map`, and a one-sentence description such as "ripgrep
    PR 2483 on its code map: 2 files added, 17 modified." The page is self-contained, so it needs no other files.
 3. Give the user the link and say in a line what is marked. For a PR, mention any deleted or moved files,
-   since those are the ghosts and arcs on the map.
+   since those are the ghosts and arcs on the map. For a stack, say how many steps and files, and that the
+   slider (or Play, or the arrow keys) steps through it.
 
 Write a local file instead (no `--artifact`, `--out` where the user wants it) when the user asks for a file,
 wants the `.svg` or `.json`, or there is no Artifact tool. A page without `--artifact` opens straight from disk.

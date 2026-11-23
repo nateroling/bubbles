@@ -3,6 +3,7 @@
 //
 //   node bubbles.ts map    [repo] [--ref REF] [--overlay FILE] [--out FILE]
 //   node bubbles.ts pr     [repo] (--pr N | --head REF) [--base REF] [--title T] [--link URL] [--out FILE]
+//   node bubbles.ts stack  [repo] (--pr N[=TITLE]... | --head REF[=TITLE]... | --commits A..B) [--base REF] [--out FILE]
 //   node bubbles.ts render MAP.json [--overlay FILE] [--out FILE]
 //
 // --out picks the format from its extension: .html (interactive page, the default), .svg (static
@@ -17,10 +18,12 @@ import { basename, dirname, extname, resolve } from 'node:path';
 import { mapAt, type CodeMap, type Every, type LayoutOptions } from './lib/layout.ts';
 import { changeMap, defaultBase, fetchPr } from './lib/pr.ts';
 import { renderHtml, renderSvg, type Overlay } from './lib/render.ts';
+import { commitItems, prLink, stackMap, type StackItem } from './lib/stack.ts';
 
 const USAGE = `usage:
   node bubbles.ts map    [repo] [--ref REF] [--overlay FILE] [--out FILE]...
   node bubbles.ts pr     [repo] (--pr N | --head REF) [--base REF] [--title T] [--link URL] [--out FILE]...
+  node bubbles.ts stack  [repo] (--pr N[=TITLE]... | --head REF[=TITLE]... | --commits A..B) [--base REF] [--title T] [--out FILE]...
   node bubbles.ts render MAP.json [--overlay FILE] [--out FILE]...
 options: --every week|day|commit  --no-cache  --cache DIR  --name LABEL  --quiet
          --artifact (.html as an Artifact page body)  --page-title TITLE
@@ -31,6 +34,7 @@ options: --every week|day|commit  --no-cache  --cache DIR  --name LABEL  --quiet
 const argv = process.argv.slice(2);
 const cmd = argv.shift();
 const opts = new Map<string, string[]>();
+const ordered: [string, string][] = []; // every option in command-line order (a stack's --pr and --head)
 const pos: string[] = [];
 const BOOL = new Set(['--no-cache', '--quiet', '--help', '--artifact']);
 for (let i = 0; i < argv.length; i++) {
@@ -40,6 +44,7 @@ for (let i = 0; i < argv.length; i++) {
     const v = a.includes('=') ? a.slice(a.indexOf('=') + 1) : BOOL.has(k) ? 'true' : argv[++i];
     if (v === undefined) fail(`${k} needs a value`);
     opts.set(k, [...(opts.get(k) ?? []), v]);
+    ordered.push([k, v]);
   } else pos.push(a);
 }
 const one = (k: string) => opts.get(k)?.at(-1);
@@ -51,7 +56,7 @@ if (!cmd || cmd === '--help' || cmd === 'help' || opts.has('--help')) {
   console.log(USAGE);
   process.exit(0);
 }
-const known = new Set(['--ref', '--overlay', '--out', '--pr', '--head', '--base', '--title', '--link', '--every', '--no-cache', '--cache', '--name', '--quiet', '--remote', '--artifact', '--page-title', '--path', '--color']);
+const known = new Set(['--ref', '--overlay', '--out', '--pr', '--head', '--base', '--title', '--link', '--every', '--no-cache', '--cache', '--name', '--quiet', '--remote', '--artifact', '--page-title', '--path', '--color', '--commits']);
 for (const k of opts.keys()) if (!known.has(k)) fail(`unknown option ${k}`);
 const every = (one('--every') ?? 'week') as Every;
 if (!['week', 'day', 'commit'].includes(every)) fail('--every must be week, day or commit');
@@ -107,6 +112,41 @@ try {
     const extra = readOverlay();
     const overlay: Overlay = { ...r.overlay, ...extra, files: { ...r.overlay.files, ...extra.files }, ghosts: [...(r.overlay.ghosts ?? []), ...(extra.ghosts ?? [])], arcs: [...(r.overlay.arcs ?? []), ...(extra.arcs ?? [])] };
     write(r.map, overlay, `bubbles-${r.map.repo}-${pr ? 'pr' + pr : r.head.slice(0, 7)}`, pr ? `${r.map.repo} PR ${pr}` : `${r.map.repo} ${head} changes`, { base: r.base, head: r.head, counts: r.counts });
+  } else if (cmd === 'stack') {
+    const repo = resolve(pos[0] ?? '.');
+    const remote = one('--remote') ?? 'origin';
+    let items: StackItem[] = [];
+    let base = one('--base');
+    let unit = 'step';
+    if (one('--commits')) {
+      if (opts.has('--pr') || opts.has('--head')) fail('stack takes --commits, or --pr/--head, not both');
+      const c = commitItems(repo, one('--commits')!);
+      items = c.items;
+      base ??= c.base;
+      unit = 'commit';
+    } else {
+      const kinds = new Set<string>();
+      for (const [k, v] of ordered) {
+        if (k !== '--pr' && k !== '--head') continue;
+        kinds.add(k);
+        const eq = v.indexOf('=');
+        const ref = eq < 0 ? v : v.slice(0, eq);
+        const title = eq < 0 ? undefined : v.slice(eq + 1);
+        if (k === '--pr') {
+          if (!/^\d+$/.test(ref)) fail(`--pr takes a pull request number, got ${ref}`);
+          items.push({ ref: fetchPr(repo, Number(ref), remote), label: `#${ref}`, title, link: prLink(repo, Number(ref), remote) });
+        } else items.push({ ref, label: ref, title });
+      }
+      if (!items.length) fail('stack needs --pr N (repeat it, bottom of the stack first), --head REF, or --commits A..B');
+      unit = kinds.size === 1 && kinds.has('--pr') ? 'PR' : 'step';
+    }
+    const r = stackMap(repo, base ?? defaultBase(repo), items, { ...lopts, title: one('--title'), link: one('--link') });
+    for (const w of r.warnings) if (!quiet) console.error(`bubbles: warning: ${w}`);
+    r.overlay.stack!.unit = unit;
+    const extra = readOverlay();
+    const overlay: Overlay = { ...r.overlay, ...extra, stack: r.overlay.stack, files: { ...r.overlay.files, ...extra.files } };
+    const n = items.length;
+    write(r.map, overlay, `bubbles-${r.map.repo}-stack-${r.heads[n - 1].slice(0, 7)}`, `${r.map.repo} stack of ${n}`, { base: r.base, heads: r.heads });
   } else if (cmd === 'render') {
     if (!pos[0]) fail('render needs a map .json file');
     const raw = JSON.parse(readFileSync(resolve(pos[0]), 'utf8'));

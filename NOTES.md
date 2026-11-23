@@ -1,5 +1,32 @@
 # Judgment calls (defaults made without asking; revisit)
 
+- **Stacks** (Nate, 2026-11-23: "light up" what each PR in a stack touches, dimly lit after). Calls made:
+  - **Nothing moves.** The layout engine keeps relaxing a little on every step (on ripgrep, ten commit-sized
+    steps moved files by a median 2 units on the first step and ~0.1-0.4 after, whole folders sliding), which
+    would read as jitter. So every file keeps the spot it had when it first appeared in the stack (base
+    files: the base map's spot), held relative to its folder's anchor as of the folder's first appearance.
+    A file a step adds goes where the engine put it as of that step, translated into that fixed frame; if
+    still-standing dots are in the way there (the engine had moved them to make room), it takes the nearest
+    free spot, with the engine's own clearances (gap in a folder; one margin per level plus a gap between
+    cells). Sizes do change (a dot grows with its file), and a grown dot may touch a neighbour a little.
+    Folder cells are re-traced each step from these spots.
+  - **Look-backward only.** Step k's frame depends on the base and steps 1..k; tested by drawing the first
+    two steps of a three-step stack on their own.
+  - **Step k's changes = diff(head k-1, head k)**, head 0 = merge base of `--base` and the first step. A
+    step that doesn't build on the one before gets a warning, not an error.
+  - **One light colour, not a colour per kind or per PR.** Current step: a near-white core with a warm
+    amber halo (radial gradient, not a blur filter, so it stays cheap). Earlier steps: the file's base
+    colour mixed 60% toward a dim ember, with a faint halo. The file's own folder cell glows too (only the
+    deepest folder, so the light stays local; ancestors would light whole regions). Kind shows in the list
+    and the tooltip. A colour per PR is a possible follow-up.
+  - **Night plate.** The stack map is drawn with the dark tokens in both themes (lights need the dark);
+    the page around it follows the theme.
+  - **Opens on the last step** (the whole stack at once, last PR bright); Play restarts from the base.
+  - **Base colours** of a stack come from the base (step 0), so a later step can't recolour the map; files
+    in folders that are new in the stack are grey until lit.
+  - **Renames**: the new path is lit as renamed (note: renamed from ...); the old path just disappears
+    (no ghost, no arc), unlike `pr`.
+
 - **Checkpoints = last commit of each calendar week (UTC, weeks from Monday)**, plus a final step on the
   commit asked for. Whether commit i is a checkpoint depends only on commits i and i+1, so the map of a commit
   never changes when later commits arrive. `--every day|commit` exists; maps made with different settings
