@@ -11,7 +11,8 @@
 
 import { cleanPath, cropMap, replay, snapshotOf, toMap, type CodeMap, type Engine, type LayoutOptions, type MapFile, type MapFolder } from './layout.ts';
 import { commitInfo, diff, git, revParse, tryGit } from './git.ts';
-import { ringD, type Overlay, type Stack, type StackFile, type StackStep, type TouchKind } from './render.ts';
+import type { Overlay, Stack, StackFile, StackStep, TouchKind } from './overlay.ts';
+import { ringD } from './svg.ts';
 import { cmp } from './snapshot.ts';
 import { round, type OutlineCache } from './contour.ts';
 import { applyChanges, cloneTree } from './tree.ts';

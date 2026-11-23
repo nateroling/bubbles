@@ -5,7 +5,7 @@
 // (their cells still deepen with nesting, so the structure shows). Root files are neutral grey.
 //
 // The colour is oklch(var(--blL) var(--bc) H): L (0, 1 or 2) picks one of three theme lightnesses and --bc
-// is the theme's chroma, so the same folder reads in the light and the dark theme (tokens in render.ts).
+// is the theme's chroma, so the same folder reads in the light and the dark theme (tokens in svg.ts).
 // Why not hue = nameAngle (colour following direction on the map)? Siblings sit on their parent's ring in
 // name order, so names that sort together sit together and would get near-equal hues (ripgrep's ci/ and
 // crates/ 2 degrees apart, .cargo/ and .github/ 1, benchsuite/, ci/, crates/ and doc/ all within 21). See NOTES.md.

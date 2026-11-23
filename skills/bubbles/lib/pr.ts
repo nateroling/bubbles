@@ -7,7 +7,7 @@
 
 import { cleanPath, replay, type CodeMap, type LayoutOptions, snapshotOf, toMap } from './layout.ts';
 import { commitInfo, diff, git, revParse, tryGit } from './git.ts';
-import type { FileMark, Ghost, Arc, Overlay } from './render.ts';
+import type { FileMark, Ghost, Arc, Overlay } from './overlay.ts';
 import { applyChanges, cloneTree } from './tree.ts';
 
 export interface ChangeOptions extends LayoutOptions {

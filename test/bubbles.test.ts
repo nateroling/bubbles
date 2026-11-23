@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { Script } from 'node:vm';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -11,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { mapAt, type CodeMap } from '../skills/bubbles/lib/layout.ts';
 import { changeMap } from '../skills/bubbles/lib/pr.ts';
 import { fileColour, folderColour, folderHue } from '../skills/bubbles/lib/groups.ts';
-import { applyRules, globMatcher, renderHtml, renderSvg } from '../skills/bubbles/lib/render.ts';
+import { applyRules, globMatcher, mergeOverlay } from '../skills/bubbles/lib/overlay.ts';
+import { PAGE_JS, renderHtml, STACK_JS } from '../skills/bubbles/lib/page.ts';
+import { renderSvg } from '../skills/bubbles/lib/svg.ts';
 import { stackMap, type StackMap } from '../skills/bubbles/lib/stack.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -396,4 +399,28 @@ test('base colours depend only on the path: the same folder has the same colour 
     }
   assert.ok(shared > 50, `${shared} folders and files drawn more than once`);
   for (const p of ['src/', 'src/core/', 'src/ui/', 'test/', 'lib/', 'lib/x/']) assert.ok(all.has(p), `${p} drawn`);
+});
+
+test("the page's browser scripts parse, and are inlined whole", () => {
+  for (const [name, js] of [['map.js', PAGE_JS], ['stack.js', STACK_JS]]) {
+    assert.doesNotThrow(() => new Script(js, { filename: name }), name);
+    assert.match(js, /^\(\(\) => \{[\s\S]*\}\)\(\);$/, `${name} is one function, called`);
+  }
+  const page = renderHtml(mapAt(repo, 'HEAD', { cacheDir: null }));
+  assert.ok(page.includes(PAGE_JS) && !page.includes(STACK_JS), 'a map page has the map script only');
+});
+
+test('overlays merge: later fields win, marks combine, lists append, a stack is kept', () => {
+  const stack = { steps: [], files: {} };
+  const m = mergeOverlay(
+    { title: 'a', files: { x: { tone: 'added' }, y: { tone: 'added' } }, arcs: [{ from: 'x', to: 'y' }], stack },
+    { title: 'b', files: { y: { tone: 'hot' } }, arcs: [{ from: 'y', to: 'x' }], ghosts: [{ path: 'z', x: 0, y: 0, r: 1 }], rules: [{ match: '*.md' }] },
+  );
+  assert.equal(m.title, 'b');
+  assert.deepEqual(m.files, { x: { tone: 'added' }, y: { tone: 'hot' } });
+  assert.equal(m.arcs!.length, 2);
+  assert.equal(m.ghosts!.length, 1);
+  assert.equal(m.rules!.length, 1);
+  assert.equal(m.stack, stack);
+  assert.deepEqual(mergeOverlay({}, {}), {}, 'nothing added to an empty overlay');
 });

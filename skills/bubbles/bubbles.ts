@@ -17,7 +17,9 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { mapAt, type CodeMap, type Every, type LayoutOptions } from './lib/layout.ts';
 import { changeMap, defaultBase, fetchPr } from './lib/pr.ts';
-import { renderHtml, renderSvg, type Overlay } from './lib/render.ts';
+import { mergeOverlay, type Overlay } from './lib/overlay.ts';
+import { renderHtml } from './lib/page.ts';
+import { renderSvg } from './lib/svg.ts';
 import { commitItems, prLink, stackMap, type StackItem } from './lib/stack.ts';
 
 const USAGE = `usage:
@@ -77,7 +79,7 @@ const readOverlay = (): Overlay => {
   const o: Overlay = one('--overlay') ? (JSON.parse(readFileSync(resolve(one('--overlay')!), 'utf8')) as Overlay) : {};
   if (one('--title')) o.title = one('--title');
   if (one('--link')) o.link = one('--link');
-  return rules.length ? { ...o, rules: [...(o.rules ?? []), ...rules] } : o;
+  return rules.length ? mergeOverlay(o, { rules }) : o;
 };
 
 function write(map: CodeMap, overlay: Overlay, stem: string, pageTitle: string, extra?: object) {
@@ -109,8 +111,7 @@ try {
     if (!head) fail('pr needs --pr N or --head REF');
     const base = one('--base') ?? defaultBase(repo);
     const r = changeMap(repo, base, head, { ...lopts, title: one('--title'), link: one('--link') });
-    const extra = readOverlay();
-    const overlay: Overlay = { ...r.overlay, ...extra, files: { ...r.overlay.files, ...extra.files }, ghosts: [...(r.overlay.ghosts ?? []), ...(extra.ghosts ?? [])], arcs: [...(r.overlay.arcs ?? []), ...(extra.arcs ?? [])] };
+    const overlay = mergeOverlay(r.overlay, readOverlay());
     write(r.map, overlay, `bubbles-${r.map.repo}-${pr ? 'pr' + pr : r.head.slice(0, 7)}`, pr ? `${r.map.repo} PR ${pr}` : `${r.map.repo} ${head} changes`, { base: r.base, head: r.head, counts: r.counts });
   } else if (cmd === 'stack') {
     const repo = resolve(pos[0] ?? '.');
@@ -143,8 +144,7 @@ try {
     const r = stackMap(repo, base ?? defaultBase(repo), items, { ...lopts, title: one('--title'), link: one('--link') });
     for (const w of r.warnings) if (!quiet) console.error(`bubbles: warning: ${w}`);
     r.overlay.stack!.unit = unit;
-    const extra = readOverlay();
-    const overlay: Overlay = { ...r.overlay, ...extra, stack: r.overlay.stack, files: { ...r.overlay.files, ...extra.files } };
+    const overlay = mergeOverlay(r.overlay, { ...readOverlay(), stack: r.overlay.stack });
     const n = items.length;
     write(r.map, overlay, `bubbles-${r.map.repo}-stack-${r.heads[n - 1].slice(0, 7)}`, `${r.map.repo} stack of ${n}`, { base: r.base, heads: r.heads });
   } else if (cmd === 'render') {
@@ -153,8 +153,7 @@ try {
     const map: CodeMap = raw.format ? raw : raw.map;
     if (map?.format !== 'bubbles/1') fail(`${pos[0]} is not a bubbles/1 file`);
     const base: Overlay = raw.format ? {} : (raw.overlay ?? {});
-    const extra = readOverlay();
-    const overlay: Overlay = { ...base, ...extra, files: { ...base.files, ...extra.files }, ghosts: [...(base.ghosts ?? []), ...(extra.ghosts ?? [])], arcs: [...(base.arcs ?? []), ...(extra.arcs ?? [])] };
+    const overlay = mergeOverlay(base, readOverlay());
     write(map, overlay, basename(pos[0], extname(pos[0])), overlay.title ?? `${map.repo}${map.root ? "/" + map.root : ""} code map`);
   } else fail(`unknown command ${cmd}`);
 } catch (e) {

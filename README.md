@@ -60,7 +60,10 @@ All paths below are in `skills/bubbles/`.
   is pinned at the origin.
 - `lib/layout.ts`: replays the layout at weekly checkpoints, caches the state in `.git/bubbles/`, and writes
   the map file: file positions and radii, folder outlines (`lib/contour.ts`).
-- `lib/render.ts`: SVG and HTML, with overlays (per-file colour, label, badge and note; ghosts; arcs).
+- `lib/overlay.ts`: the overlay model (per-file colour, label, badge and note; colour rules; ghosts; arcs; a
+  stack), merging overlays, and turning rules into marks.
+- `lib/svg.ts`: the map as SVG, and the theme tokens. `lib/page.ts`: the HTML page around it, with the
+  browser scripts in `lib/browser/` (`map.js`: pan, zoom, hover, names; `stack.js`: the slider).
 - `lib/groups.ts`: the base colours. A folder's colour comes from its path alone (a hash of its first two
   levels picks a hue and one of three lightnesses), so the same folder has the same colour on every map.
 - `lib/pr.ts`: the pull request layer.
