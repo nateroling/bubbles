@@ -16,11 +16,12 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { mapAt, type CodeMap, type Every, type LayoutOptions } from './lib/layout.ts';
-import { changeMap, defaultBase, fetchPr } from './lib/pr.ts';
+import { defaultBase, fetchPr, prLink } from './lib/change.ts';
+import { changeMap } from './lib/pr.ts';
 import { mergeOverlay, type Overlay } from './lib/overlay.ts';
 import { renderHtml } from './lib/page.ts';
 import { renderSvg } from './lib/svg.ts';
-import { commitItems, prLink, stackMap, type StackItem } from './lib/stack.ts';
+import { commitItems, stackMap, type StackItem } from './lib/stack.ts';
 
 const USAGE = `usage:
   node bubbles.ts map    [repo] [--ref REF] [--overlay FILE] [--out FILE]...

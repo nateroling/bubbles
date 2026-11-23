@@ -121,7 +121,10 @@ export function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
   const st = ov.stack;
   const S = st ? Math.max(0, Math.min(st.steps.length, st.start ?? st.steps.length)) : 0;
   const ff = st?.frames?.files ?? {};
-  const fd = st?.frames?.folders ?? {};
+  // folder frames as SVG paths (the page's script swaps them in as the slider moves)
+  const fd: Record<string, ([number] | [number, string])[]> = Object.fromEntries(
+    Object.entries(st?.frames?.folders ?? {}).map(([p, list]) => [p, list.map((e): [number] | [number, string] => (e.length === 1 ? e : [e[0], typeof e[1] === 'string' ? e[1] : ringD(e[1])]))]),
+  );
   const dim = st ? true : (ov.dim ?? (Object.keys(marks).length > 0 || ghosts.length > 0 || arcs.length > 0));
   // base colours come from paths alone (lib/groups.ts), so every map of a repo agrees; each distinct colour
   // is a custom property on the map (--k0, --k1...) to keep the page small

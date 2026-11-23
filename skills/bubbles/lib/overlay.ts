@@ -79,12 +79,13 @@ export interface StackFile {
  * a step touches light up brightly at that step and stay dimly lit after (only files light up, never
  * folders). Deleted files stay as dashed outlines. `frames` hold how the map differs at each step from the map
  * the stack is drawn on: for a file, [step, x, y, r] means it is there from that step on, [step] that it is
- * gone; for a folder, [step, svgPathD] or [step]. Without frames every file is where the map has it.
+ * gone; for a folder, [step, outline rings] (as MapFolder.outline) or [step]. (Saved stacks from before
+ * v0.4.2 hold an SVG path string in place of the rings; they still render.) Without frames every file is where the map has it.
  */
 export interface Stack {
   steps: StackStep[];
   files: Record<string, StackFile>;
-  frames?: { files?: Record<string, ([number] | [number, number, number, number])[]>; folders?: Record<string, ([number] | [number, string])[]> };
+  frames?: { files?: Record<string, ([number] | [number, number, number, number])[]>; folders?: Record<string, ([number] | [number, number[][] | string])[]> };
   start?: number; // the step the page opens on (default: the last)
   unit?: string; // what a step is called: "PR" (default "step")
 }

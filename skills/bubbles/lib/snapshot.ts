@@ -93,3 +93,9 @@ export function buildSnapshot(name: string, entries: [string, number][], sha = '
   walk(root);
   return { name, sha, date, root, files, dirs };
 }
+
+/** The last segment of a path: `b.ts` for `src/a/b.ts`. */
+export const fileName = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+
+/** Whether `path` is in folder `dir` (at any depth); every path is in the root, ''. */
+export const inFolder = (dir: string, path: string) => !dir || path.startsWith(dir + '/');

@@ -9,13 +9,13 @@
 // The page holds one frame per step as differences from the last one; files a PR touches light up at
 // its step and stay dimly lit after.
 
-import { cleanPath, cropMap, replay, snapshotOf, toMap, type CodeMap, type Engine, type LayoutOptions, type MapFile, type MapFolder } from './layout.ts';
-import { commitInfo, diff, git, revParse, tryGit } from './git.ts';
-import type { Overlay, Stack, StackFile, StackStep, TouchKind } from './overlay.ts';
-import { ringD } from './svg.ts';
-import { cmp } from './snapshot.ts';
+import { badgeOf, KIND, mergeBase, stepTo } from './change.ts';
 import { round, type OutlineCache } from './contour.ts';
-import { applyChanges, cloneTree } from './tree.ts';
+import { commitInfo, git, revParse, tryGit } from './git.ts';
+import { cleanPath, cropMap, replay, toMap, type CodeMap, type Engine, type LayoutOptions, type MapFile, type MapFolder } from './layout.ts';
+import type { Overlay, Stack, StackFile, StackStep, TouchKind } from './overlay.ts';
+import { cmp, inFolder } from './snapshot.ts';
+import { cloneTree } from './tree.ts';
 
 export interface StackItem {
   ref: string; // a commit-ish (for a PR: refs/bubbles/pr/N after fetchPr)
@@ -37,16 +37,8 @@ export interface StackMap {
   warnings: string[];
 }
 
-const KIND: Record<string, TouchKind> = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed' };
 const MAX_STEPS = 60;
 const SEARCH = 40; // how far from the layout's spot a new file may go to find room
-
-/** A GitHub pull request URL for `pr` on `remote`, when the remote is on github.com. */
-export function prLink(repo: string, pr: number, remote = 'origin'): string | undefined {
-  const url = tryGit(repo, ['remote', 'get-url', remote])?.trim();
-  const m = url?.match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
-  return m ? `https://github.com/${m[1]}/${m[2]}/pull/${pr}` : undefined;
-}
 
 /** The first-parent commits in `a..b`, oldest first, as stack items. */
 export function commitItems(repo: string, range: string): { base: string; items: StackItem[] } {
@@ -57,17 +49,14 @@ export function commitItems(repo: string, range: string): { base: string; items:
   return { base: m[1], items: shas.map((s) => ({ ref: s, label: s.slice(0, 7) })) };
 }
 
-
-
 export function stackMap(repo: string, baseRef: string, items: StackItem[], opts: StackOptions = {}): StackMap {
   if (!items.length) throw new Error('bubbles: the stack is empty');
   if (items.length > MAX_STEPS) throw new Error(`bubbles: a stack of ${items.length} is too long (at most ${MAX_STEPS})`);
   const heads = items.map((it) => revParse(repo, it.ref));
-  const base = git(repo, ['merge-base', revParse(repo, baseRef), heads[0]]).trim();
+  const base = mergeBase(repo, baseRef, heads[0]);
   const e = replay(repo, base, opts);
   const every = e.opts.every!;
   const dir = cleanPath(opts.path);
-  const inside = (p: string) => !dir || p.startsWith(dir + '/');
   // fixed spots: a folder's anchor is its parent's plus its offset when it first appeared; a file's spot
   // is where the layout put it when it (re)appeared, relative to its folder's anchor then
   const fixedAnchor = new Map<string, [number, number]>([['', [0, 0]]]);
@@ -180,21 +169,16 @@ export function stackMap(repo: string, baseRef: string, items: StackItem[], opts
   heads.forEach((h, k) => {
     const it = items[k];
     if (tryGit(e.repo, ['merge-base', '--is-ancestor', prev, h]) === null) warnings.push(`${it.label} does not build on ${k ? items[k - 1].label : 'the base'}; its step shows everything that differs between the two`);
-    const { changes, lines } = diff(e.repo, prev, h);
-    applyChanges(tree, changes);
-    if (!tree.files.size) throw new Error(`bubbles: ${it.label} has no files`);
-    const { snap, ids } = snapshotOf(tree, e.name);
-    const scene = e.dots.step(snap, ids);
-    const info = commitInfo(e.repo, h);
+    const { snap, scene, info, changes, lines } = stepTo(e, tree, prev, h, it.label);
     frames.push(frameOf({ snap, scene, dots: e.dots, name: e.name }, info));
     const counts: Partial<Record<TouchKind, number>> = {};
     for (const ch of changes) {
-      if (!inside(ch.path)) continue;
+      if (!inFolder(dir, ch.path)) continue;
       const kind = KIND[ch.type];
       counts[kind] = (counts[kind] ?? 0) + 1;
-      const l = lines.get(ch.path);
+      const badge = badgeOf(lines, ch.path);
       const note = ch.type === 'R' ? `renamed from ${ch.oldPath}` : undefined;
-      (touched[ch.path] ??= { touches: [] }).touches.push({ step: k + 1, kind, ...(l ? { badge: `+${l[0]} −${l[1]}` } : {}), ...(note ? { note } : {}) });
+      (touched[ch.path] ??= { touches: [] }).touches.push({ step: k + 1, kind, ...(badge ? { badge } : {}), ...(note ? { note } : {}) });
     }
     steps.push({ label: it.label, title: it.title ?? info.subject, ...(it.link ? { link: it.link } : {}), commit: h, counts });
     prev = h;
@@ -222,14 +206,14 @@ export function stackMap(repo: string, baseRef: string, items: StackItem[], opts
     });
     if (list.length) fileFrames[p] = list;
   }
-  const folderFrames: Record<string, ([number] | [number, string])[]> = {};
+  const folderFrames: Record<string, ([number] | [number, number[][]])[]> = {};
   for (const [p, def] of folders) {
-    const list: ([number] | [number, string])[] = [];
-    let cur = ringD(def.outline);
+    const list: ([number] | [number, number[][]])[] = [];
+    let cur = JSON.stringify(def.outline);
     frames.forEach((_, s) => {
       const g = folderAt[s].get(p);
-      const key = g ? ringD(g.outline) : '-';
-      if (key !== cur) list.push(g ? [s, key] : [s]);
+      const key = g ? JSON.stringify(g.outline) : '-';
+      if (key !== cur) list.push(g ? [s, g.outline] : [s]);
       cur = key;
     });
     if (list.length) folderFrames[p] = list;
