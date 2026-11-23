@@ -17,8 +17,11 @@ export interface Outline {
   top: [number, number]; // the outline's topmost point (a place for the folder's name)
 }
 
+/** A memo of traced outlines between calls: a folder whose dots are unchanged reuses its outline. */
+export type OutlineCache = Map<string, { key: string; o: Outline }>;
+
 /** Outlines for every folder (depth >= 1), keyed by folder path. */
-export function outlines(dots: Dot[], margin: number): Map<string, Outline> {
+export function outlines(dots: Dot[], margin: number, cache?: OutlineCache): Map<string, Outline> {
   const members = new Map<string, { depth: number; idx: number[] }>();
   dots.forEach((d, i) => {
     d.dirs.forEach((p, k) => {
@@ -28,7 +31,18 @@ export function outlines(dots: Dot[], margin: number): Map<string, Outline> {
     });
   });
   const out = new Map<string, Outline>();
-  for (const [path, m] of members) out.set(path, trace(dots, m.idx, m.depth, margin));
+  for (const [path, m] of members) {
+    if (!cache) {
+      out.set(path, trace(dots, m.idx, m.depth, margin));
+      continue;
+    }
+    const key = m.idx.map((i) => `${dots[i].x},${dots[i].y},${dots[i].r},${dots[i].dirs.length}`).join(';');
+    const hit = cache.get(path);
+    const o = hit && hit.key === key ? hit.o : trace(dots, m.idx, m.depth, margin);
+    cache.set(path, { key, o });
+    out.set(path, o);
+  }
+  if (cache) for (const k of [...cache.keys()]) if (!members.has(k)) cache.delete(k);
   return out;
 }
 

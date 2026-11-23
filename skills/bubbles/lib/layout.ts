@@ -11,7 +11,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { outlines, round } from './contour.ts';
+import { outlines, round, type OutlineCache } from './contour.ts';
 import { DotCells, type DotParams, type DotScene, type DotState } from './dots.ts';
 import { commitInfo, commits, git, revParse, timeline } from './git.ts';
 import { buildSnapshot, cmp, hash, type Snapshot } from './snapshot.ts';
@@ -209,14 +209,14 @@ export function cropMap(map: CodeMap, dir: string, origin: [number, number]): Co
 }
 
 /** Turn a laid-out snapshot into the map file (cropped to `path` when given). */
-export function toMap(e: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'>, info: { sha: string; date: string; subject: string }, every: Every, path = ''): CodeMap {
+export function toMap(e: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'> & { outlineCache?: OutlineCache }, info: { sha: string; date: string; subject: string }, every: Every, path = ''): CodeMap {
   const dir = cleanPath(path);
   if (dir && !e.snap.dirs.some((d) => d.path === dir)) throw new Error(`bubbles: ${dir} is not a folder at ${info.sha.slice(0, 7)}`);
   const whole = toWholeMap(e, info, every);
   return dir ? cropMap(whole, dir, anchorOf(e.dots, dir)) : whole;
 }
 
-function toWholeMap(e: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'>, info: { sha: string; date: string; subject: string }, every: Every): CodeMap {
+function toWholeMap(e: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'> & { outlineCache?: OutlineCache }, info: { sha: string; date: string; subject: string }, every: Every): CodeMap {
   const { snap, scene } = e;
   const files: MapFile[] = scene.marks.map((m) => ({ path: snap.files[m.f].path, x: round(m.x), y: round(m.y), r: round(m.r), size: snap.files[m.f].size }));
   const chains = scene.marks.map((m) => {
@@ -227,6 +227,7 @@ function toWholeMap(e: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'>, info: {
   const shapes = outlines(
     scene.marks.map((m, k) => ({ x: m.x, y: m.y, r: m.r, dirs: chains[k] })),
     e.dots.p.margin,
+    e.outlineCache,
   );
   const folders: MapFolder[] = snap.dirs
     .filter((d) => d.parent)

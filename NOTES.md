@@ -16,8 +16,7 @@
     step that doesn't build on the one before gets a warning, not an error.
   - **One light colour, not a colour per kind or per PR.** Current step: a near-white core with a warm
     amber halo (radial gradient, not a blur filter, so it stays cheap). Earlier steps: the file's base
-    colour mixed 60% toward a dim ember, with a faint halo. The file's own folder cell glows too (only the
-    deepest folder, so the light stays local; ancestors would light whole regions). Kind shows in the list
+    colour mixed 60% toward a dim ember, with a faint halo. Folder cells don't light up (Nate, 2026-11-23: glowing folders were hard to read; only files glow). Kind shows in the list
     and the tooltip. A colour per PR is a possible follow-up.
   - **Night plate.** The stack map is drawn with the dark tokens in both themes (lights need the dark);
     the page around it follows the theme.

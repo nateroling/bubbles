@@ -54,8 +54,8 @@ Requests come in plain words, like "/bubbles src and make storybook files green"
 
 - A stack ("show what my stack of PRs 101-110 does", "step through these branches") is `stack`, with
   `--pr` or `--head` once per step, bottom of the stack first. The page has a slider across the stack: at
-  each step the files that step touches light up brightly, files touched by earlier steps stay dimly lit,
-  and the folder cells around them glow with them; added files appear and deleted ones become dashed
+  each step the files that step touches light up brightly, files touched by earlier steps stay dimly lit
+  (only files light up, not folders); added files appear and deleted ones become dashed
   outlines. It opens on the last step; Play steps through from the base. Add `=TITLE` to name a step
   (`--pr '101=Add the parser'`); without it a step is named after its head commit's subject, so pass PR
   titles when you know them. `--pr` fetches each PR as `pr` does and links it on GitHub. The base defaults

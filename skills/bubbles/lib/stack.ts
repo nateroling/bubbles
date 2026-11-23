@@ -13,7 +13,7 @@ import { cleanPath, cropMap, replay, snapshotOf, toMap, type CodeMap, type Engin
 import { commitInfo, diff, git, revParse, tryGit } from './git.ts';
 import { ringD, type Overlay, type Stack, type StackFile, type StackStep, type TouchKind } from './render.ts';
 import { cmp } from './snapshot.ts';
-import { round } from './contour.ts';
+import { round, type OutlineCache } from './contour.ts';
 import { applyChanges, cloneTree } from './tree.ts';
 
 export interface StackItem {
@@ -38,6 +38,7 @@ export interface StackMap {
 
 const KIND: Record<string, TouchKind> = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed' };
 const MAX_STEPS = 60;
+const SEARCH = 40; // how far from the layout's spot a new file may go to find room
 
 /** A GitHub pull request URL for `pr` on `remote`, when the remote is on github.com. */
 export function prLink(repo: string, pr: number, remote = 'origin'): string | undefined {
@@ -82,6 +83,7 @@ export function stackMap(repo: string, baseRef: string, items: StackItem[], opts
     const depth = c ? c.split('/').length : 0;
     return p.r + margin * (p.depth - depth) + q.r + margin * (q.depth - depth) + gapOut;
   };
+  const outlineCache: OutlineCache = new Map(); // nothing moves, so most folders keep their outline
   let first = true; // the base frame is the layout's own
   const frameOf = (eng: Pick<Engine, 'snap' | 'scene' | 'dots' | 'name'>, info: { sha: string; date: string; subject: string }): CodeMap => {
     const { snap, scene, dots } = eng;
@@ -119,10 +121,24 @@ export function stackMap(repo: string, baseRef: string, items: StackItem[], opts
       const b = fixedAnchor.get(f.dir.path)!;
       const me = { x: m.x - a[0] + b[0], y: m.y - a[1] + b[1], r: m.r, dir: f.dir.path, depth: f.dir.depth };
       if (!first) {
-        const free = (x: number, y: number) => placed.every((o) => Math.hypot(o.x - x, o.y - y) >= clearance(me, o) - 1e-9);
+        // the clearance to each dot doesn't depend on where `me` goes: work it out once, for the dots
+        // near enough to matter within the search radius
+        const near: number[] = []; // x, y, squared clearance
+        for (const o of placed) {
+          const c = clearance(me, o);
+          if (Math.hypot(o.x - me.x, o.y - me.y) - c <= SEARCH + 1e-9) near.push(o.x, o.y, (c - 1e-9) * (c - 1e-9));
+        }
+        const free = (x: number, y: number) => {
+          for (let i = 0; i < near.length; i += 3) {
+            const dx = near[i] - x;
+            const dy = near[i + 1] - y;
+            if (dx * dx + dy * dy < near[i + 2]) return false;
+          }
+          return true;
+        };
         if (!free(me.x, me.y)) {
           let found = false;
-          for (let k = 1; k <= 400 && !found; k++) {
+          for (let k = 1; k * 0.1 <= SEARCH && !found; k++) {
             const rad = k * 0.1;
             const steps = Math.max(8, Math.ceil((2 * Math.PI * rad) / 0.1));
             for (let j = 0; j < steps; j++) {
@@ -149,7 +165,7 @@ export function stackMap(repo: string, baseRef: string, items: StackItem[], opts
     });
     for (const k of [...fixedAnchor.keys()]) if (k && !live.has(k)) fixedAnchor.delete(k);
     first = false;
-    const whole = toMap({ snap, scene: { ...scene, marks }, dots, name: eng.name }, info, every);
+    const whole = toMap({ snap, scene: { ...scene, marks }, dots, name: eng.name, outlineCache }, info, every);
     if (!dir) return whole;
     if (!fixedAnchor.has(dir)) throw new Error(`bubbles: ${dir} is not a folder at ${info.sha.slice(0, 7)}`);
     return cropMap(whole, dir, fixedAnchor.get(dir)!);

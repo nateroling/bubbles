@@ -79,8 +79,8 @@ export interface StackFile {
 
 /**
  * A stack of changes on one map, with a slider from step 0 (the base, nothing lit) to the last step. Files
- * a step touches light up brightly at that step and stay dimly lit after; their folder's cell glows with
- * them. Deleted files stay as dashed outlines. `frames` hold how the map differs at each step from the map
+ * a step touches light up brightly at that step and stay dimly lit after (only files light up, never
+ * folders). Deleted files stay as dashed outlines. `frames` hold how the map differs at each step from the map
  * the stack is drawn on: for a file, [step, x, y, r] means it is there from that step on, [step] that it is
  * gone; for a folder, [step, svgPathD] or [step]. Without frames every file is where the map has it.
  */
@@ -139,7 +139,7 @@ const DARK =
   '--added:#69db7c;--modified:#ffa94d;--deleted:#f783ac;--renamed:#74c0fc;--hot:#ff6b6b;--warm:#ffd43b;--cool:#4dabf7;--muted-tone:#adb5bd;' +
   '--red:#ff6b6b;--orange:#ff922b;--yellow:#ffd43b;--green:#69db7c;--teal:#3bc9db;--blue:#4dabf7;--purple:#9775fa;--pink:#f783ac;--brown:#c0a080;--gray:#adb5bd;';
 
-const GLOW = '--glow:#ffc94a;--glow-core:#fff3c9;--ember:#a8782f;--ember-cell:#7a5a26;';
+const GLOW = '--glow:#ffc94a;--glow-core:#fff3c9;--ember:#a8782f;';
 
 /** Theme tokens: light on :root, dark under the OS setting and under an explicit data-theme. A stack is
  *  drawn at night in both themes (the dark tokens on the map), so its lights read as lights. */
@@ -159,18 +159,16 @@ const MAP_CSS = `.cm-map{display:block;background:var(--panel)}
 .cm-map .hot{stroke:var(--ink);stroke-width:2px;vector-effect:non-scaling-stroke}
 .cm-map .cell.hot{stroke-width:1.5px}
 .cm-map .absent{display:none}
-.cm-map .halo,.cm-map .clight{pointer-events:none;opacity:0;transition:opacity .6s}
+.cm-map .halo{pointer-events:none;opacity:0;transition:opacity .6s}
 .cm-map .halo{fill:url(#cm-glow);transform-box:fill-box;transform-origin:center}
 .cm-map .halo.now{opacity:1}.cm-map .halo.past{opacity:.22;fill:url(#cm-ember)}
-.cm-map .clight{fill:var(--glow)}
-.cm-map .clight.now{opacity:.2}.cm-map .clight.past{opacity:.09;fill:var(--ember-cell)}
 .cm-map .dot.now,.cm-map .dot.past{transition:fill .6s}
 .cm-map .dot.now{fill:var(--glow-core)}.cm-map .dot.past{fill:color-mix(in srgb,var(--ember) 60%,var(--c))}
 .cm-map .dot.gone{fill:none;stroke:var(--ember);stroke-width:1.2px;stroke-dasharray:2 2;vector-effect:non-scaling-stroke}
 .cm-map .dot.gone.now{stroke:var(--glow-core)}
 .cm-map .halo.flare{animation:cm-flare 1.1s ease-out}
 @keyframes cm-flare{from{transform:scale(1.9)}to{transform:scale(1)}}
-@media (prefers-reduced-motion:reduce){.cm-map .halo.flare{animation:none}.cm-map .halo,.cm-map .clight,.cm-map .dot.now,.cm-map .dot.past{transition:none}}`;
+@media (prefers-reduced-motion:reduce){.cm-map .halo.flare{animation:none}.cm-map .halo,.cm-map .dot.now,.cm-map .dot.past{transition:none}}`;
 
 // ---- the SVG ----
 
@@ -261,7 +259,6 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
     const t = touchAt(st.files[f.path], S);
     return lightOf(f.path) + (on ? '' : t?.kind === 'deleted' ? ' gone' : ' absent');
   };
-  const dirOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf('/')));
 
   // folder cells, shallow first so each subfolder sits on its parent
   out.push('<g class="cells">');
@@ -275,21 +272,9 @@ function prepare(map: CodeMap, ov: Overlay, opt: SvgOptions): Prepared {
   }
   out.push('</g>');
 
-  // a stack's cell lights: the folder of every touched file glows with it
+  // a stack's lights: a halo under every touched file (only files light up, never folders)
   if (st) {
-    out.push('<g class="clights">');
-    const lit = new Map<string, string>();
-    for (const p of Object.keys(st.files)) {
-      const l = lightOf(p).trim();
-      const d = dirOf(p);
-      lit.set(d, lit.get(d) === 'now' || l === 'now' ? 'now' : lit.get(d) || l);
-    }
-    for (const f of folders) {
-      if (!lit.has(f.path)) continue;
-      const [[d], on] = frameAt<string>(fd[f.path], S, [ringD(f.outline)]);
-      out.push(`<path class="clight ${lit.get(f.path)}${on ? '' : ' absent'}" data-c="${esc(f.path)}" fill-rule="evenodd" d="${d}"/>`);
-    }
-    out.push('</g><g class="halos">');
+    out.push('<g class="halos">');
     map.files.forEach((f, i) => {
       if (!st.files[f.path]) return;
       const [[x, y, r]] = geo(f);
@@ -659,14 +644,12 @@ const n = K.steps.length, U = K.unit;
 const q = (s) => [...svg.querySelectorAll(s)];
 const byAttr = (sel, a) => { const m = {}; for (const el of q(sel)) (m[el.getAttribute(a)] ||= []).push(el); return m; };
 const dot = byAttr('.dots .dot[data-i]', 'data-i'), halo = byAttr('.halo', 'data-h'), flab = byAttr('text[data-fi]', 'data-fi');
-const cell = byAttr('.cells .cell', 'data-d'), clight = byAttr('.clight', 'data-c'), dlab = byAttr('text[data-dp]', 'data-dp');
+const cell = byAttr('.cells .cell', 'data-d'), dlab = byAttr('text[data-dp]', 'data-dp');
 const keys = new Set([...Object.keys(K.ff), ...Object.keys(K.touch)]);
 const home = {}; for (const i of keys) { const f = D.files[i]; home[i] = [f[2], f[3], f[4]]; }
 const homeD = {}; for (const p in K.fd) homeD[p] = cell[p] ? cell[p][0].getAttribute('d') : '';
 function at(list, s, d) { let g = d, on = true; for (const e of list || []) { if (e[0] > s) break; if (e.length > 1) { g = e.slice(1); on = true; } else on = false; } return [g, on]; }
 function touchAt(i, s) { let t = null; for (const x of K.touch[i] || []) if (x[0] <= s) t = x; return t; }
-const dirOf = (p) => p.slice(0, Math.max(0, p.lastIndexOf('/')));
-const inDir = {}; for (const i in K.touch) (inDir[dirOf(D.files[i][0])] ||= []).push(i);
 const tog = (els, c, on) => { for (const el of els || []) el.classList.toggle(c, !!on); };
 const r = document.getElementById('st-range'), now = document.getElementById('st-now'), steps = document.getElementById('st-steps'), list = document.getElementById('st-files'), head = document.getElementById('st-files-h');
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -692,13 +675,8 @@ function setStep(s, flare) {
   }
   for (const p in K.fd) {
     const [g, on] = at(K.fd[p], s, [homeD[p]]);
-    for (const el of [...(cell[p] || []), ...(clight[p] || [])]) { el.setAttribute('d', g[0]); el.classList.toggle('absent', !on); }
+    for (const el of cell[p] || []) { el.setAttribute('d', g[0]); el.classList.toggle('absent', !on); }
     tog(dlab[p], 'off', !on);
-  }
-  for (const d in clight) {
-    let l = '';
-    for (const i of inDir[d] || []) { const t = touchAt(i, s); if (t) l = t[0] === s ? 'now' : l || 'past'; if (l === 'now') break; }
-    tog(clight[d], 'now', l === 'now'); tog(clight[d], 'past', l === 'past');
   }
   api.place();
   ui(s);
