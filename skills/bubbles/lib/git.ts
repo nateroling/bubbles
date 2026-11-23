@@ -5,8 +5,15 @@ import { execFileSync } from 'node:child_process';
 const RS = '\x1e';
 const US = '\x1f';
 
+/**
+ * Settings pinned on every call, so a person's git config can't change what we parse: quoted paths, signature
+ * lines mixed into `git log`, and how far rename detection goes (git's default limit, pinned so a map is the
+ * same on every machine).
+ */
+const PINNED = ['-c', 'core.quotePath=false', '-c', 'log.showSignature=false', '-c', 'diff.renameLimit=1000'];
+
 export function git(repo: string, args: string[], input?: string): string {
-  return execFileSync('git', ['-C', repo, '-c', 'core.quotePath=false', ...args], {
+  return execFileSync('git', ['-C', repo, ...PINNED, ...args], {
     encoding: 'utf8',
     maxBuffer: 1 << 30,
     input,

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,6 +72,58 @@ test('a map is the same with or without the cache, and wherever the cache was le
   assert.equal(S(mapAt(repo, 'HEAD', { cacheDir: cache })), cold);
   assert.equal(S(mapAt(repo, 'HEAD', { cacheDir: cache })), cold); // resumed from the latest checkpoint
   for (const every of ['day', 'commit'] as const) assert.equal(S(mapAt(repo, shas[30], { every, cacheDir: cache })), S(mapAt(repo, shas[30], { every, cacheDir: null })));
+});
+
+test('a cache entry that only partly reads is ignored, not half-used', () => {
+  const cold = S(mapAt(repo, 'HEAD', { cacheDir: null, every: 'commit' }));
+  for (const broken of [(s: any) => delete s.dots.off, (s: any) => delete s.tree.nextId, () => '{"tree":']) {
+    const cache = mkdtempSync(join(tmpdir(), 'codemap-cache-'));
+    mapAt(repo, shas[20], { cacheDir: cache, every: 'commit' });
+    for (const f of readdirSync(cache)) {
+      const s = JSON.parse(readFileSync(join(cache, f), 'utf8'));
+      const r = broken(s);
+      writeFileSync(join(cache, f), typeof r === 'string' ? r : JSON.stringify(s));
+    }
+    const logs: string[] = [];
+    assert.equal(S(mapAt(repo, 'HEAD', { cacheDir: cache, every: 'commit', log: (m) => logs.push(m) })), cold);
+    assert.ok(logs.some((m) => m.startsWith('ignoring an unreadable cache entry')), logs.join('\n'));
+  }
+});
+
+test("a person's git config can't change or break the map", () => {
+  const plain = S(mapAt(repo, 'HEAD', { cacheDir: null }));
+  const saved = { ...process.env };
+  try {
+    // added after any GIT_CONFIG_* entries already in the environment
+    let n = Number(process.env.GIT_CONFIG_COUNT ?? 0);
+    for (const [k, v] of [['log.showSignature', 'true'], ['diff.renameLimit', '1'], ['color.ui', 'always'], ['core.quotePath', 'true']]) {
+      process.env[`GIT_CONFIG_KEY_${n}`] = k;
+      process.env[`GIT_CONFIG_VALUE_${n++}`] = v;
+    }
+    process.env.GIT_CONFIG_COUNT = String(n);
+    assert.equal(S(mapAt(repo, 'HEAD', { cacheDir: null })), plain);
+    // log.showSignature only bites on a signed commit: git then mixes gpg's lines into `git log` output.
+    // A commit with a made-up signature is enough (and needs no key), when gpg is installed.
+    let gpg = true;
+    try {
+      execFileSync('gpg', ['--version'], { stdio: 'ignore' });
+    } catch {
+      gpg = false;
+    }
+    if (gpg) {
+      const r2 = mkdtempSync(join(tmpdir(), 'codemap-signed-'));
+      execFileSync('git', ['clone', '-q', repo, r2], { env: ENV });
+      const tree = git(r2, 'rev-parse', 'HEAD^{tree}').trim();
+      const parent = git(r2, 'rev-parse', 'HEAD').trim();
+      const body = `tree ${tree}\nparent ${parent}\nauthor T <t@example.invalid> 1800000000 +0000\ncommitter T <t@example.invalid> 1800000000 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEz\n -----END PGP SIGNATURE-----\n\nsigned\n`;
+      const sha = execFileSync('git', ['-C', r2, 'hash-object', '-t', 'commit', '-w', '--stdin'], { env: ENV, input: body, encoding: 'utf8' }).trim();
+      git(r2, 'update-ref', 'HEAD', sha);
+      assert.equal(mapAt(r2, 'HEAD', { cacheDir: null }).commit, sha);
+    }
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
 });
 
 test('the map of a commit does not change when later commits arrive', () => {

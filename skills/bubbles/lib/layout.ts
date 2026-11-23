@@ -106,7 +106,7 @@ export function replay(repoPath: string, ref = 'HEAD', opts: LayoutOptions = {})
   const target = revParse(repo, ref);
   const line = timeline(repo, target);
   const n = line.length - 1;
-  const dots = new DotCells(opts.params);
+  let dots = new DotCells(opts.params);
   const key = `v${LAYOUT_VERSION}-${every}-${hash(JSON.stringify(dots.p)).toString(16)}`;
   const isCheckpoint = (i: number) => i < n && bucket(every, line[i][1], i) !== bucket(every, line[i + 1][1], i + 1);
 
@@ -119,12 +119,18 @@ export function replay(repoPath: string, ref = 'HEAD', opts: LayoutOptions = {})
     for (let i = n - 1; i >= 0; i--)
       if (have.has(line[i][0]) && isCheckpoint(i)) {
         try {
+          // load into fresh objects and keep them only if the whole entry reads: a half-loaded state
+          // replayed from the root would give a wrong map without any error
           const s = JSON.parse(readFileSync(join(dir, `${key}-${line[i][0]}.json`), 'utf8')) as Saved;
-          tree = loadTree(s.tree);
-          dots.load(s.dots);
+          const t = loadTree(s.tree);
+          if (!Number.isInteger(t.nextId)) throw new Error('no nextId');
+          const d = new DotCells(opts.params);
+          d.load(s.dots);
+          tree = t;
+          dots = d;
           from = i;
-        } catch {
-          // unreadable cache entry: ignore it
+        } catch (err) {
+          log(`ignoring an unreadable cache entry (${(err as Error).message}); replaying from the start`);
         }
         break;
       }
