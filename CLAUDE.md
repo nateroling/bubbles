@@ -8,7 +8,9 @@
 - Bump `LAYOUT_VERSION` in `lib/layout.ts` whenever the map of a given history changes; it is part of the
   cache key.
 - Keep `SKILL.md` in step with the CLI: every option and both file formats are documented there.
-- Tests: `npm test` (node:test, `test/*.test.ts`), on temp repos built with real git.
+- Tests: `npm test` (node:test, `test/*.test.ts`), on temp repos built with real git. Type check: `npm run check`
+  (strict tsc; Node strips types without checking them). Both run in CI. TypeScript and @types/node are the only
+  dev dependencies; nothing is needed at run time.
 - Taste or judgment calls: make a reasonable default, note it in NOTES.md, keep going.
 - Layout: the plugin is the repo root (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`); the skill,
   CLI and `lib/` live in `skills/bubbles/`.
