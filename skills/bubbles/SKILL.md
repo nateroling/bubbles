@@ -115,7 +115,7 @@ An overlay is JSON. Everything is optional; paths are repo-relative, as in the m
     "unit": "PR",
     "steps": [{ "label": "#101", "title": "Add the parser", "link": "https://...", "counts": { "added": 2 } }],
     "files": { "src/parse.rs": { "touches": [{ "step": 1, "kind": "added", "badge": "+120 −0" }] } },
-    "frames": { "files": { "src/parse.rs": [[0], [1, 4.2, -3.1, 0.8]] }, "folders": { "src": [[1, "M0 0L..."]] } },
+    "frames": { "files": { "src/parse.rs": [[0], [1, 4.2, -3.1, 0.8]] }, "folders": { "src": [[1, [[0, 0, 4, 0, 4, 3]]]] } },
     "start": 1
   }
 }
@@ -138,7 +138,7 @@ An overlay is JSON. Everything is optional; paths are repo-relative, as in the m
   `files` lights up at each step that touches it (`kind`: added, modified, deleted, renamed) and stays
   dimly lit after; `start` is the step the page opens on (default: the last). `frames` say how the map
   differs at each step from the map it is drawn on: for a file `[step, x, y, r]` (there from that step
-  on) or `[step]` (gone from that step on); for a folder `[step, svgPathD]` or `[step]`. Without frames,
+  on) or `[step]` (gone from that step on); for a folder `[step, rings]` (rings as in the map's `outline`) or `[step]`. Without frames,
   every file is where the map has it at every step. `bubbles stack --out stack.json` writes the map and a
   full stack overlay to start from. The map is drawn at night (dark, in either theme) so the lights read.
 

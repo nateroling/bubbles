@@ -45,7 +45,8 @@ function put(repo: string, path: string, size: number) {
   writeFileSync(join(repo, path), (path + ' ').repeat(Math.ceil(size / (path.length + 1))).slice(0, size));
 }
 
-/** ~40 commits over ~6 weeks: folders grow, a file moves folder, a folder is renamed, files are deleted. */
+/** ~40 commits over ~6 weeks on main (folders grow, a file moves folder, a folder is renamed, files are
+ *  deleted), plus the branches feature and s1..s3 on top. */
 function buildRepo(): { repo: string; shas: string[] } {
   const repo = mkdtempSync(join(tmpdir(), 'codemap-'));
   git(repo, 'init', '-q', '-b', 'main');
@@ -62,6 +63,33 @@ function buildRepo(): { repo: string; shas: string[] } {
     if (k === 30) rmSync(join(repo, 'test', 't5.test.ts'));
     shas.push(commit(repo, `step ${k}`));
   }
+  // branches the PR and stack tests read; made here, before any test, so no test depends on another
+  // having run. Tests never change this repo: one that needs to commits in its own clone.
+  // feature: adds, modifies, deletes and moves a file across folders
+  git(repo, 'checkout', '-q', '-b', 'feature');
+  put(repo, 'src/ui/new.ts', 1200);
+  put(repo, 'src/core/f1.ts', 7777);
+  rmSync(join(repo, 'guide', 'd0.md'));
+  git(repo, 'add', '-A');
+  git(repo, 'mv', 'src/ui/w9.ts', 'test/w9.ts');
+  commit(repo, 'feature work');
+  git(repo, 'checkout', '-q', 'main');
+  // s1 -> s2 -> s3, a stack: adds, a new folder, a delete, a rename into it, a new top-level folder
+  git(repo, 'checkout', '-q', '-b', 's1', 'main');
+  put(repo, 'src/ui/s1.ts', 900);
+  put(repo, 'src/core/f2.ts', 900);
+  commit(repo, 's1');
+  git(repo, 'checkout', '-q', '-b', 's2');
+  put(repo, 'src/net/a.ts', 1500);
+  put(repo, 'src/net/b.ts', 700);
+  rmSync(join(repo, 'guide', 'd4.md'));
+  commit(repo, 's2');
+  git(repo, 'checkout', '-q', '-b', 's3');
+  git(repo, 'mv', 'src/ui/s1.ts', 'src/net/s1.ts');
+  put(repo, 'src/net/a.ts', 1600);
+  put(repo, 'lib/x/y.ts', 2000);
+  commit(repo, 's3');
+  git(repo, 'checkout', '-q', 'main');
   return { repo, shas };
 }
 
@@ -174,14 +202,6 @@ test('files hold still from commit to commit, dots never overlap, and every fold
 });
 
 test('the PR overlay marks added, modified, deleted and moved files', () => {
-  git(repo, 'checkout', '-q', '-b', 'feature');
-  put(repo, 'src/ui/new.ts', 1200);
-  put(repo, 'src/core/f1.ts', 7777);
-  rmSync(join(repo, 'guide', 'd0.md'));
-  git(repo, 'add', '-A');
-  git(repo, 'mv', 'src/ui/w9.ts', 'test/w9.ts');
-  commit(repo, 'feature work');
-  git(repo, 'checkout', '-q', 'main');
   const r = changeMap(repo, 'main', 'feature', { cacheDir: null });
   assert.deepEqual(r.counts, { added: 1, modified: 1, deleted: 1, renamed: 1 });
   assert.equal(r.overlay.files!['src/ui/new.ts'].tone, 'added');
@@ -280,21 +300,6 @@ function stackAt(r: StackMap, s: number): Map<string, number[]> {
 }
 
 test('a stack: each step lights what it touches, nothing moves, and no step looks ahead', () => {
-  git(repo, 'checkout', '-q', '-b', 's1', 'main');
-  put(repo, 'src/ui/s1.ts', 900);
-  put(repo, 'src/core/f2.ts', 900);
-  commit(repo, 's1');
-  git(repo, 'checkout', '-q', '-b', 's2');
-  put(repo, 'src/net/a.ts', 1500);
-  put(repo, 'src/net/b.ts', 700);
-  rmSync(join(repo, 'guide', 'd4.md'));
-  commit(repo, 's2');
-  git(repo, 'checkout', '-q', '-b', 's3');
-  git(repo, 'mv', 'src/ui/s1.ts', 'src/net/s1.ts');
-  put(repo, 'src/net/a.ts', 1600);
-  put(repo, 'lib/x/y.ts', 2000);
-  commit(repo, 's3');
-  git(repo, 'checkout', '-q', 'main');
   const items = ['s1', 's2', 's3'].map((ref) => ({ ref, label: ref }));
   const r = stackMap(repo, 'main', items, { cacheDir: null });
   const st = r.overlay.stack!;

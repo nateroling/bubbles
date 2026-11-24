@@ -9,7 +9,7 @@
       "name": "bubbles",
       "source": "./",
       "description": "A stable spatial map of a git repository (files as dots, folders as nested cells) with overlays, such as the files a pull request changes.",
-      "version": "0.4.1"
+      "version": "0.4.2"
     }
   ]
 }

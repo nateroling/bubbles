@@ -66,6 +66,8 @@ All paths below are in `skills/bubbles/`.
   browser scripts in `lib/browser/` (`map.js`: pan, zoom, hover, names; `stack.js`: the slider).
 - `lib/groups.ts`: the base colours. A folder's colour comes from its path alone (a hash of its first two
   levels picks a hue and one of three lightnesses), so the same folder has the same colour on every map.
+- `lib/change.ts`: what a branch changes, as one more layout step (shared by the PR and stack layers);
+  finding the base branch, fetching a PR.
 - `lib/pr.ts`: the pull request layer.
 - `lib/stack.ts`: the stack layer: several PRs (or branches, or commits) in order, with a slider. Each one
   lights up the files it touches; they stay dimly lit after.
